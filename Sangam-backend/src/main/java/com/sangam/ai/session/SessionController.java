@@ -2,8 +2,6 @@ package com.sangam.ai.session;
 
 import com.sangam.ai.common.response.ApiResponse;
 import com.sangam.ai.user.User;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;

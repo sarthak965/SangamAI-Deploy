@@ -57,18 +57,14 @@ public class SessionService {
      * transaction held open that entire time.
      */
     public UUID ask(UUID sessionId, String question, User user) {
-
         Session session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new IllegalArgumentException("Session not found"));
 
         assertCanInteractWithAi(session.getEnvironment().getId(), user);
 
-        // Create the node immediately and return its ID.
-        // The client subscribes to this node's channel and
-        // starts receiving tokens as they arrive.
         ConversationNode node = ConversationNode.builder()
                 .session(session)
-                .parent(null)       // root node for now — Stage 3 adds child nodes
+                .parent(null)
                 .depth(0)
                 .question(question)
                 .askedBy(user)
@@ -78,72 +74,84 @@ public class SessionService {
 
         ConversationNode savedNode = nodeRepository.save(node);
 
-        // Kick off streaming asynchronously — we don't block here.
-        // The client is already listening on the Centrifugo channel.
-        streamAiResponse(savedNode, question);
+        // Build full context THEN stream
+        List<AiMessage> messages = buildRootLevelContext(session, question);
+        streamAiResponse(savedNode, messages);
 
         return savedNode.getId();
     }
+    private List<AiMessage> buildRootLevelContext(Session session, String newQuestion) {
+        List<AiMessage> messages = new ArrayList<>();
 
-    private void streamAiResponse(ConversationNode node, String question) {
-        List<AiMessage> messages = List.of(
-                AiMessage.system("""
-                    You are a collaborative AI assistant in SangamAI, 
-                    a platform where teams have shared AI conversations.
-                    Give clear, well-structured responses with natural 
-                    paragraph breaks between distinct ideas.
-                    """),
-                AiMessage.user(question)
-        );
+        messages.add(AiMessage.system("""
+            You are a collaborative AI assistant in SangamAI, a platform
+            where teams have shared AI conversations together in real time.
+            
+            Give clear, thoughtful responses. Use natural paragraph breaks
+            between distinct ideas. Do not use bullet points or headers
+            unless specifically asked.
+            """));
 
-        // These hold state as tokens arrive
+        List<ConversationNode> history = nodeRepository
+                .findBySessionIdOrderByCreatedAtAsc(session.getId())
+                .stream()
+                .filter(n -> n.getStatus() == ConversationNode.Status.COMPLETE)
+                .filter(n -> n.getDepth() == 0)
+                .toList();
+
+        int start = Math.max(0, history.size() - 10);
+        for (ConversationNode past : history.subList(start, history.size())) {
+            if (past.getQuestion() != null && !past.getQuestion().isBlank()) {
+                messages.add(AiMessage.user(past.getQuestion()));
+            }
+            if (past.getFullContent() != null && !past.getFullContent().isBlank()) {
+                messages.add(AiMessage.assistant(past.getFullContent()));
+            }
+        }
+
+        messages.add(AiMessage.user(newQuestion));
+        return messages;
+    }
+
+    private void streamAiResponse(ConversationNode node, List<AiMessage> messages) {
         StringBuilder fullContent = new StringBuilder();
         StringBuilder currentParagraph = new StringBuilder();
-        final int[] paragraphIndex = {0};  // array trick to mutate in lambda
+        final int[] paragraphIndex = {0};
 
         aiProvider.streamResponse(messages)
                 .doOnNext(chunk -> {
-                    // 1. Append to full content buffer
                     fullContent.append(chunk);
                     currentParagraph.append(chunk);
-
-                    // 2. Publish this chunk to Centrifugo — all members see it live
                     centrifugoService.publishTokenChunk(node.getId(), chunk);
 
-                    // 3. Check if this chunk contains a paragraph boundary
                     if (isParagraphBoundary(currentParagraph.toString())) {
                         String paraContent = currentParagraph.toString().trim();
                         if (!paraContent.isEmpty()) {
                             saveParagraph(node, paragraphIndex[0], paraContent);
                             paragraphIndex[0]++;
                         }
-                        currentParagraph.setLength(0); // reset buffer
+                        currentParagraph.setLength(0);
                     }
                 })
                 .doOnComplete(() -> {
-                    // Save any remaining content as the final paragraph
                     String remaining = currentParagraph.toString().trim();
                     if (!remaining.isEmpty()) {
                         saveParagraph(node, paragraphIndex[0], remaining);
                     }
-
-                    // Mark node complete and save full content
                     node.setFullContent(fullContent.toString());
                     node.setStatus(ConversationNode.Status.COMPLETE);
                     nodeRepository.save(node);
-
-                    // Tell all clients the stream is finished
                     centrifugoService.publishStreamComplete(node.getId());
                     log.info("Stream complete for node {}", node.getId());
                 })
                 .doOnError(e -> {
                     log.error("AI streaming error for node {}: {}", node.getId(), e.getMessage());
-                    node.setStatus(ConversationNode.Status.COMPLETE);
                     node.setFullContent(fullContent.toString());
+                    node.setStatus(ConversationNode.Status.COMPLETE);
                     nodeRepository.save(node);
                     centrifugoService.publishStreamComplete(node.getId());
                 })
-                .subscribe(); // this triggers the stream — non-blocking
+                .subscribe();
     }
 
     private void saveParagraph(ConversationNode node, int index, String content) {
