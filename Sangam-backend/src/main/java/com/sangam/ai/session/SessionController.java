@@ -1,7 +1,10 @@
 package com.sangam.ai.session;
 
 import com.sangam.ai.common.response.ApiResponse;
+import com.sangam.ai.session.dto.AskOnParagraphRequest;
+import com.sangam.ai.session.dto.SessionSnapshotDto;
 import com.sangam.ai.user.User;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -35,7 +38,7 @@ public class SessionController {
         )));
     }
 
-    // POST /api/sessions/{sessionId}/ask
+    // POST /api/sessions/{sessionId}/ask  — root level question
     @PostMapping("/sessions/{sessionId}/ask")
     public ResponseEntity<ApiResponse<Map<String, UUID>>> ask(
             @PathVariable UUID sessionId,
@@ -48,9 +51,30 @@ public class SessionController {
         }
 
         UUID nodeId = sessionService.ask(sessionId, question, currentUser);
-
-        // We return the nodeId immediately — the client uses this to
-        // subscribe to node:{nodeId}:stream on Centrifugo and receive tokens
         return ResponseEntity.ok(ApiResponse.ok(Map.of("nodeId", nodeId)));
+    }
+
+    // POST /api/nodes/{nodeId}/paragraphs/{paragraphId}/ask — paragraph follow-up
+    @PostMapping("/nodes/{nodeId}/paragraphs/{paragraphId}/ask")
+    public ResponseEntity<ApiResponse<Map<String, UUID>>> askOnParagraph(
+            @PathVariable UUID nodeId,
+            @PathVariable UUID paragraphId,
+            @Valid @RequestBody AskOnParagraphRequest request,
+            @AuthenticationPrincipal User currentUser) {
+
+        UUID childNodeId = sessionService.askOnParagraph(
+                nodeId, paragraphId, request.question(), currentUser);
+
+        return ResponseEntity.ok(ApiResponse.ok(Map.of("nodeId", childNodeId)));
+    }
+
+    // GET /api/sessions/{sessionId}/snapshot — full tree for new members
+    @GetMapping("/sessions/{sessionId}/snapshot")
+    public ResponseEntity<ApiResponse<SessionSnapshotDto>> getSnapshot(
+            @PathVariable UUID sessionId,
+            @AuthenticationPrincipal User currentUser) {
+
+        return ResponseEntity.ok(ApiResponse.ok(
+                sessionService.getSnapshot(sessionId, currentUser)));
     }
 }

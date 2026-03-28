@@ -6,4 +6,7 @@ import java.util.UUID;
 
 public interface ConversationNodeRepository extends JpaRepository<ConversationNode, UUID> {
     List<ConversationNode> findBySessionIdOrderByCreatedAtAsc(UUID sessionId);
+    List<ConversationNode> findByParentIdOrderByCreatedAtAsc(UUID parentId);
+
+    List<ConversationNode> findBySessionIdAndDepthOrderByCreatedAtAsc(UUID sessionId, int depth);
 }
