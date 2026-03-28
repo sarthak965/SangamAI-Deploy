@@ -1,0 +1,258 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+		 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		 xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+	<modelVersion>4.0.0</modelVersion>
+
+	<!--
+        The parent block pulls in Spring Boot's dependency management.
+        This means you don't have to specify versions for most libraries —
+        Spring Boot picks compatible versions for everything automatically.
+    -->
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>3.3.4</version>
+		<relativePath/>
+	</parent>
+
+	<!-- Your project's identity -->
+	<groupId>com.sangam.ai</groupId>
+	<artifactId>sangamai-backend</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>sangamai-backend</name>
+	<description>SangamAI — Collaborative AI Conversation Platform</description>
+
+	<properties>
+		<!-- Tell Maven to use Java 21 for compiling -->
+		<java.version>21</java.version>
+		<!-- JWT library version — we manage this one manually -->
+		<jjwt.version>0.12.6</jjwt.version>
+	</properties>
+
+	<dependencies>
+
+		<!--
+            ============================================================
+            WEB LAYER
+            ============================================================
+        -->
+
+		<!--
+            Spring Web: gives you @RestController, @GetMapping, etc.
+            This is your standard REST API layer.
+            Includes an embedded Tomcat server so you don't need
+            to deploy a WAR file anywhere — just run the JAR.
+        -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-web</artifactId>
+		</dependency>
+
+		<!--
+            Spring WebFlux: the reactive programming model.
+            We include this specifically for WebClient, which is
+            Spring's modern HTTP client for making non-blocking calls
+            to the AI API (Anthropic/OpenAI) and to Centrifugo.
+            We are NOT replacing the whole app with reactive — just
+            using WebClient from within our regular Spring MVC app.
+        -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webflux</artifactId>
+		</dependency>
+
+		<!--
+            ============================================================
+            SECURITY LAYER
+            ============================================================
+        -->
+
+		<!--
+            Spring Security: handles authentication and authorization.
+            With this, you can protect endpoints so only logged-in
+            users (or users with specific roles) can access them.
+        -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security</artifactId>
+		</dependency>
+
+		<!--
+            JJWT (Java JWT): the library we use to CREATE and VERIFY
+            JWT tokens. Three JARs are needed:
+            - api: the interfaces
+            - impl: the implementation
+            - jackson: JSON serialization support for JWT claims
+        -->
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-api</artifactId>
+			<version>${jjwt.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-impl</artifactId>
+			<version>${jjwt.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-jackson</artifactId>
+			<version>${jjwt.version}</version>
+			<scope>runtime</scope>
+		</dependency>
+
+		<!--
+            ============================================================
+            DATABASE LAYER
+            ============================================================
+        -->
+
+		<!--
+            Spring Data JPA: lets you talk to PostgreSQL using Java objects
+            instead of raw SQL. You define an entity class (e.g. User.java)
+            and JPA maps it to a database table automatically.
+            Includes Hibernate as the underlying ORM implementation.
+        -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-jpa</artifactId>
+		</dependency>
+
+		<!--
+            The PostgreSQL JDBC driver: the actual connector that lets
+            Java communicate with your PostgreSQL database.
+        -->
+		<dependency>
+			<groupId>org.postgresql</groupId>
+			<artifactId>postgresql</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+
+		<!--
+            Flyway: database migration tool. Instead of manually running
+            SQL scripts whenever the schema changes, you write versioned
+            migration files (V1__create_users.sql, V2__create_environments.sql)
+            and Flyway runs them automatically on startup in order.
+            This keeps your database schema in sync with your code.
+        -->
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-core</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-database-postgresql</artifactId>
+		</dependency>
+
+		<!--
+            ============================================================
+            REDIS LAYER
+            ============================================================
+        -->
+
+		<!--
+            Spring Data Redis: Spring's integration with Redis.
+            Gives you RedisTemplate for storing and retrieving data,
+            and supports caching annotations like @Cacheable.
+        -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
+
+		<!--
+            Redisson: a more powerful Redis client than the default Lettuce.
+            We use it specifically for the distributed job queue — it gives
+            us RQueue and RBlockingQueue which are perfect for our
+            async AI job processing pattern.
+        -->
+		<dependency>
+			<groupId>org.redisson</groupId>
+			<artifactId>redisson-spring-boot-starter</artifactId>
+			<version>3.36.0</version>
+		</dependency>
+
+		<!--
+            ============================================================
+            UTILITY LAYER
+            ============================================================
+        -->
+
+		<!--
+            Lombok: reduces boilerplate. Instead of writing getters,
+            setters, constructors, and toString() methods manually,
+            you put annotations like @Getter, @Setter, @Builder on
+            your class and Lombok generates the code at compile time.
+            Huge time saver, especially for entity and DTO classes.
+        -->
+		<dependency>
+			<groupId>org.projectlombok</groupId>
+			<artifactId>lombok</artifactId>
+			<optional>true</optional>
+		</dependency>
+
+		<!--
+            Spring Validation: lets you put constraints like @NotBlank,
+            @Email, @Size directly on your request DTO fields, and Spring
+            will validate incoming requests automatically before they
+            even reach your controller logic.
+        -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-validation</artifactId>
+		</dependency>
+
+		<!--
+            ============================================================
+            TESTING LAYER
+            ============================================================
+        -->
+
+		<!--
+            Spring Boot Test: includes JUnit 5, Mockito, and AssertJ
+            for writing unit and integration tests. We'll use this
+            later when we write tests for our services.
+        -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.security</groupId>
+			<artifactId>spring-security-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+	</dependencies>
+
+	<build>
+		<plugins>
+			<!--
+                The Spring Boot Maven plugin lets you:
+                1. Run the app with: mvn spring-boot:run
+                2. Package it as a single executable JAR with: mvn package
+                The excludes block tells it to not bundle Lombok into
+                the final JAR since Lombok is only needed at compile time.
+            -->
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+				<configuration>
+					<excludes>
+						<exclude>
+							<groupId>org.projectlombok</groupId>
+							<artifactId>lombok</artifactId>
+						</exclude>
+					</excludes>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
+
+</project>
