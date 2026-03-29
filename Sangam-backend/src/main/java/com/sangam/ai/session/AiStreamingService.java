@@ -23,6 +23,7 @@ public class AiStreamingService {
     private final UserRepository userRepository;
     private final AiProvider aiProvider;
     private final CentrifugoService centrifugoService;
+    private final SnapshotCacheService snapshotCacheService;
 
     /**
      * Entry point called by AiJobWorker.
@@ -171,6 +172,9 @@ public class AiStreamingService {
                     node.setStatus(ConversationNode.Status.COMPLETE);
                     nodeRepository.save(node);
                     centrifugoService.publishStreamComplete(node.getId());
+                    // Invalidate snapshot cache — node is now complete
+                    // Next snapshot call will rebuild from PostgreSQL with fresh content
+                    snapshotCacheService.invalidate(node.getSession().getId());
                     log.info("Stream complete for node {}", node.getId());
                 })
                 .doOnError(e -> {

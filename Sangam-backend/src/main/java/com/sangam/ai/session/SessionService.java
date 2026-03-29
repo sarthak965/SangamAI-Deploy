@@ -25,6 +25,7 @@ public class SessionService {
     private final SessionRepository sessionRepository;
     private final ConversationNodeRepository nodeRepository;
     private final ParagraphRepository paragraphRepository;
+    private final SnapshotCacheService snapshotCacheService;
     private final EnvironmentRepository environmentRepository;
     private final EnvironmentMemberRepository memberRepository;
     private final AiJobQueue jobQueue;
@@ -133,7 +134,10 @@ public class SessionService {
                 session.getEnvironment().getId(), user.getId())) {
             throw new SecurityException("You are not a member of this environment");
         }
-
+        SessionSnapshotDto cached = snapshotCacheService.get(sessionId);
+        if (cached != null) {
+            return cached;
+        }
         List<ConversationNode> allNodes =
                 nodeRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
 
@@ -142,12 +146,16 @@ public class SessionService {
                 .map(n -> buildNodeDto(n, allNodes))
                 .toList();
 
-        return new SessionSnapshotDto(
+        SessionSnapshotDto snapshot = new SessionSnapshotDto(
                 session.getId(),
                 session.getTitle(),
                 session.getStatus().name(),
                 rootNodes
         );
+        // Save to Redis for next caller
+        snapshotCacheService.put(sessionId, snapshot);
+
+        return snapshot;
     }
 
     private ConversationNodeDto buildNodeDto(
