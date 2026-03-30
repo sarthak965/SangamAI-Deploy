@@ -1,11 +1,8 @@
 package com.sangam.ai.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.redisson.Redisson;
 import org.redisson.api.RedissonClient;
 import org.redisson.config.Config;
-import org.redisson.codec.JsonJacksonCodec;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -37,12 +34,6 @@ public class RedissonConfig {
         if (redisPassword != null && !redisPassword.isBlank()) {
             config.useSingleServer().setPassword(redisPassword);
         }
-
-        // Use Jackson for JSON serialization of job objects.
-        // JavaTimeModule handles Instant/LocalDateTime serialization.
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.registerModule(new JavaTimeModule());
-        config.setCodec(new JsonJacksonCodec(mapper));
 
         return Redisson.create(config);
     }

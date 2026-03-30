@@ -32,6 +32,7 @@ public class ConversationNode {
     @Column(name = "paragraph_id")
     private UUID paragraphId;
 
+    @Builder.Default
     @Column(nullable = false)
     private int depth = 0;
 
@@ -42,11 +43,13 @@ public class ConversationNode {
     @JoinColumn(name = "asked_by")
     private User askedBy;
 
+    @Builder.Default
     // Starts empty, built up token by token during streaming
     @Column(columnDefinition = "TEXT", nullable = false)
     private String fullContent = "";
 
-    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    @Convert(converter = ConversationNodeStatusConverter.class)
     @Column(nullable = false)
     private Status status = Status.STREAMING;
 

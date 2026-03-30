@@ -161,6 +161,11 @@ public class AiStreamingService {
                             paragraphIndex[0]++;
                         }
                         currentParagraph.setLength(0);
+
+                        // Flush fullContent to DB so polling clients see
+                        // the growing response even if they missed Centrifugo chunks
+                        node.setFullContent(fullContent.toString());
+                        nodeRepository.save(node);
                     }
                 })
                 .doOnComplete(() -> {
@@ -184,6 +189,7 @@ public class AiStreamingService {
                     node.setStatus(ConversationNode.Status.COMPLETE);
                     nodeRepository.save(node);
                     centrifugoService.publishStreamComplete(node.getId());
+                    snapshotCacheService.invalidate(node.getSession().getId());
                 })
                 .subscribe();
     }

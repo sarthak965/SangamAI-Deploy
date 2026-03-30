@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.util.Map;
 import java.util.UUID;
@@ -26,6 +27,7 @@ public class CentrifugoService {
      */
     public void publish(String channel, Object data) {
         centrifugoWebClient.post()
+                .uri("/api/publish")
                 .bodyValue(Map.of(
                         "channel", channel,
                         "data", data
@@ -35,6 +37,7 @@ public class CentrifugoService {
                 .doOnError(e -> log.warn(
                         "Failed to publish to Centrifugo channel {}: {}",
                         channel, e.getMessage()))
+                .onErrorResume(e -> Mono.empty())
                 .subscribe();
     }
 
@@ -64,5 +67,9 @@ public class CentrifugoService {
 
     public void publishNodeCreated(UUID sessionId, Object nodeData) {
         publish("session:" + sessionId + ":events", nodeData);
+    }
+
+    public void publishEnvironmentEvent(UUID environmentId, Object eventData) {
+        publish("env:" + environmentId, eventData);
     }
 }

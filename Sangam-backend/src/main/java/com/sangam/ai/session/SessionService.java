@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -36,7 +37,7 @@ public class SessionService {
         var environment = environmentRepository.findById(environmentId)
                 .orElseThrow(() -> new IllegalArgumentException("Environment not found"));
 
-        assertCanInteractWithAi(environmentId, user);
+        assertCanAskRootAi(environmentId, user);
 
         return sessionRepository.save(Session.builder()
                 .environment(environment)
@@ -50,7 +51,7 @@ public class SessionService {
         Session session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new IllegalArgumentException("Session not found"));
 
-        assertCanInteractWithAi(session.getEnvironment().getId(), user);
+        assertCanAskRootAi(session.getEnvironment().getId(), user);
 
         // Create node immediately
         ConversationNode node = nodeRepository.save(ConversationNode.builder()
@@ -63,9 +64,22 @@ public class SessionService {
                 .status(ConversationNode.Status.STREAMING)
                 .build());
 
+        // Notify all session members that a new root stream has started
+        centrifugoService.publishNodeCreated(
+                sessionId,
+                new HashMap<>() {{
+                    put("type", "root_node_created");
+                    put("nodeId", node.getId().toString());
+                    put("depth", 0);
+                    put("question", question);
+                    put("askedBy", user.getUsername());
+                }}
+        );
+
         // Push to Redis queue — worker picks it up and streams
         jobQueue.enqueue(AiJob.rootJob(
                 node.getId(), sessionId, question, user.getId()));
+        snapshotCacheService.invalidate(sessionId);
 
         return node.getId();
     }
@@ -122,6 +136,7 @@ public class SessionService {
         jobQueue.enqueue(AiJob.paragraphJob(
                 childNode.getId(), parentNode.getSession().getId(),
                 question, user.getId(), parentNodeId, paragraphId));
+        snapshotCacheService.invalidate(parentNode.getSession().getId());
 
         return childNode.getId();
     }
@@ -134,12 +149,22 @@ public class SessionService {
                 session.getEnvironment().getId(), user.getId())) {
             throw new SecurityException("You are not a member of this environment");
         }
-        SessionSnapshotDto cached = snapshotCacheService.get(sessionId);
-        if (cached != null) {
-            return cached;
-        }
+
+        // Load all nodes once — used for both the streaming check and building the snapshot
         List<ConversationNode> allNodes =
                 nodeRepository.findBySessionIdOrderByCreatedAtAsc(sessionId);
+
+        boolean hasStreamingNodes = allNodes.stream()
+                .anyMatch(n -> n.getStatus() == ConversationNode.Status.STREAMING);
+
+        // Only use cache when nothing is streaming — during streaming we need
+        // fresh DB data every poll so the frontend sees fullContent grow.
+        if (!hasStreamingNodes) {
+            SessionSnapshotDto cached = snapshotCacheService.get(sessionId);
+            if (cached != null) {
+                return cached;
+            }
+        }
 
         List<ConversationNodeDto> rootNodes = allNodes.stream()
                 .filter(n -> n.getDepth() == 0)
@@ -152,8 +177,11 @@ public class SessionService {
                 session.getStatus().name(),
                 rootNodes
         );
-        // Save to Redis for next caller
-        snapshotCacheService.put(sessionId, snapshot);
+
+        // Only cache when all nodes are complete — never cache mid-stream
+        if (!hasStreamingNodes) {
+            snapshotCacheService.put(sessionId, snapshot);
+        }
 
         return snapshot;
     }
@@ -185,14 +213,53 @@ public class SessionService {
         return ConversationNodeDto.from(node, paragraphDtos, childDtos);
     }
 
+    private void assertCanAskRootAi(UUID environmentId, User user) {
+        EnvironmentMember member = memberRepository
+                .findByEnvironmentIdAndUserId(environmentId, user.getId())
+                .orElseThrow(() -> new SecurityException("You are not a member"));
+
+        if (member.getEnvironment().getHost().getId().equals(user.getId())
+                || member.getRole() == EnvironmentMember.Role.CO_HOST) {
+            return;
+        }
+
+        throw new SecurityException(
+                "Only the owner or a co-host can ask the root AI in this environment");
+    }
+
     private void assertCanInteractWithAi(UUID environmentId, User user) {
         EnvironmentMember member = memberRepository
                 .findByEnvironmentIdAndUserId(environmentId, user.getId())
                 .orElseThrow(() -> new SecurityException("You are not a member"));
 
-        if (!member.isCanInteractWithAi()) {
+        boolean isOwner = member.getEnvironment().getHost().getId().equals(user.getId());
+        boolean isCoHost = member.getRole() == EnvironmentMember.Role.CO_HOST;
+
+        if (!isOwner && !isCoHost && !member.isCanInteractWithAi()) {
             throw new SecurityException(
                     "You don't have permission to interact with AI");
         }
+    }
+    public List<Map<String, Object>> getSessionsForEnvironment(
+            UUID environmentId, User user) {
+
+        if (!memberRepository.existsByEnvironmentIdAndUserId(
+                environmentId, user.getId())) {
+            throw new SecurityException("You are not a member of this environment");
+        }
+
+        return sessionRepository
+                .findByEnvironmentIdOrderByCreatedAtDesc(environmentId)
+                .stream()
+                .map(s -> {
+                    Map<String, Object> map = new java.util.HashMap<>();
+                    map.put("sessionId", s.getId());
+                    map.put("title", s.getTitle() != null ? s.getTitle() : "");
+                    map.put("status", s.getStatus().name());
+                    map.put("createdAt", s.getCreatedAt());
+                    map.put("createdBy", s.getCreatedBy().getUsername());
+                    return map;
+                })
+                .toList();
     }
 }

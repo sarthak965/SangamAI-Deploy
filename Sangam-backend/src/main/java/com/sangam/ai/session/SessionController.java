@@ -1,6 +1,7 @@
 package com.sangam.ai.session;
 
 import com.sangam.ai.common.response.ApiResponse;
+import com.sangam.ai.environment.EnvironmentMemberRepository;
 import com.sangam.ai.session.dto.AskOnParagraphRequest;
 import com.sangam.ai.session.dto.SessionSnapshotDto;
 import com.sangam.ai.user.User;
@@ -11,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -76,5 +78,13 @@ public class SessionController {
 
         return ResponseEntity.ok(ApiResponse.ok(
                 sessionService.getSnapshot(sessionId, currentUser)));
+    }
+    @GetMapping("/environments/{environmentId}/sessions")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getSessions(
+            @PathVariable UUID environmentId,
+            @AuthenticationPrincipal User currentUser) {
+
+        return ResponseEntity.ok(ApiResponse.ok(
+                sessionService.getSessionsForEnvironment(environmentId, currentUser)));
     }
 }

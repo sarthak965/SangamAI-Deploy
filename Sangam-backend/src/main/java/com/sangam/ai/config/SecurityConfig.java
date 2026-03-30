@@ -5,9 +5,11 @@ import com.sangam.ai.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -27,6 +29,8 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                .cors(Customizer.withDefaults())
+
                 // Disable CSRF — we don't use browser cookies for auth.
                 // Our JWTs are sent in headers, which are immune to CSRF attacks.
                 .csrf(AbstractHttpConfigurer::disable)
@@ -40,6 +44,8 @@ public class SecurityConfig {
 
                 // Define which endpoints are public and which require auth.
                 .authorizeHttpRequests(auth -> auth
+                        // Let browser CORS preflight requests pass through.
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         // Anyone can hit the auth endpoints — obviously, since
                         // you need to register/login before you have a token.
                         .requestMatchers("/api/auth/**").permitAll()

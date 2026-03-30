@@ -1,6 +1,7 @@
 package com.sangam.ai.environment;
 
 import com.sangam.ai.environment.dto.*;
+import com.sangam.ai.realtime.CentrifugoService;
 import com.sangam.ai.user.User;
 import com.sangam.ai.user.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -17,12 +18,11 @@ public class EnvironmentService {
     private final EnvironmentRepository environmentRepository;
     private final EnvironmentMemberRepository memberRepository;
     private final UserRepository userRepository;
+    private final CentrifugoService centrifugoService;
 
     /**
-     * Creates a new environment and automatically adds the creator as HOST.
-     * @Transactional means: if anything fails inside this method,
-     * ALL database changes are rolled back. So you never end up with
-     * an environment that has no host member record, or vice versa.
+     * Creates a new environment and automatically adds the creator as the owner
+     * plus an administrative co-host member row for membership-based lookups.
      */
     @Transactional
     public EnvironmentResponse createEnvironment(CreateEnvironmentRequest request, User host) {
@@ -36,11 +36,11 @@ public class EnvironmentService {
 
         Environment saved = environmentRepository.save(environment);
 
-        // Automatically add the creator as a HOST member with AI permission
+        // Owner also gets a co-host membership row so membership queries work uniformly.
         EnvironmentMember hostMember = EnvironmentMember.builder()
                 .environment(saved)
                 .user(host)
-                .role(EnvironmentMember.Role.HOST)
+                .role(EnvironmentMember.Role.CO_HOST)
                 .canInteractWithAi(true)
                 .build();
 
@@ -67,10 +67,21 @@ public class EnvironmentService {
                 .environment(environment)
                 .user(user)
                 .role(EnvironmentMember.Role.MEMBER)
-                .canInteractWithAi(false)  // host must explicitly grant this
+                .canInteractWithAi(false)  // owner or co-host must explicitly grant this
                 .build();
 
-        memberRepository.save(member);
+        EnvironmentMember savedMember = memberRepository.save(member);
+        MemberResponse response = MemberResponse.from(savedMember, false);
+
+        centrifugoService.publishEnvironmentEvent(environment.getId(), new java.util.HashMap<>() {{
+            put("type", "member_added");
+            put("username", savedMember.getUser().getUsername());
+            put("displayName", savedMember.getUser().getDisplayName());
+            put("role", response.role());
+            put("owner", response.owner());
+            put("canInteractWithAi", response.canInteractWithAi());
+        }});
+
         return EnvironmentResponse.from(environment);
     }
 
@@ -81,21 +92,63 @@ public class EnvironmentService {
     public List<MemberResponse> getMembers(UUID environmentId, User requestingUser) {
         assertIsMember(environmentId, requestingUser);
 
+        Environment environment = environmentRepository.findById(environmentId)
+                .orElseThrow(() -> new IllegalArgumentException("Environment not found"));
+
         return memberRepository.findByEnvironmentId(environmentId)
                 .stream()
-                .map(MemberResponse::from)
+                .map(member -> MemberResponse.from(
+                        member,
+                        environment.getHost().getId().equals(member.getUser().getId())))
                 .toList();
     }
 
     /**
-     * Host updates whether a member can interact with the AI.
-     * Only the HOST can call this.
+     * Owner or co-host adds an existing user to the environment by username.
      */
     @Transactional
-    public MemberResponse updateMemberPermission(UUID environmentId,
-                                                 UpdatePermissionRequest request,
-                                                 User requestingUser) {
-        assertIsHost(environmentId, requestingUser);
+    public MemberResponse addMemberByUsername(UUID environmentId,
+                                              AddMemberRequest request,
+                                              User requestingUser) {
+        Environment environment = assertCanManageEnvironment(environmentId, requestingUser);
+
+        User targetUser = userRepository.findByUsername(request.username())
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        if (memberRepository.existsByEnvironmentIdAndUserId(environmentId, targetUser.getId())) {
+            throw new IllegalArgumentException("User is already a member of this environment");
+        }
+
+        EnvironmentMember member = EnvironmentMember.builder()
+                .environment(environment)
+                .user(targetUser)
+                .role(EnvironmentMember.Role.MEMBER)
+                .canInteractWithAi(false)
+                .build();
+
+        EnvironmentMember savedMember = memberRepository.save(member);
+        MemberResponse response = MemberResponse.from(savedMember, false);
+
+        centrifugoService.publishEnvironmentEvent(environmentId, new java.util.HashMap<>() {{
+            put("type", "member_added");
+            put("username", savedMember.getUser().getUsername());
+            put("displayName", savedMember.getUser().getDisplayName());
+            put("role", response.role());
+            put("owner", response.owner());
+            put("canInteractWithAi", response.canInteractWithAi());
+        }});
+
+        return response;
+    }
+
+    /**
+     * Owner can promote or demote members between CO_HOST and MEMBER.
+     */
+    @Transactional
+    public MemberResponse updateMemberRole(UUID environmentId,
+                                           UpdateMemberRoleRequest request,
+                                           User requestingUser) {
+        Environment environment = assertIsOwner(environmentId, requestingUser);
 
         User targetUser = userRepository.findByUsername(request.username())
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
@@ -104,8 +157,66 @@ public class EnvironmentService {
                 .findByEnvironmentIdAndUserId(environmentId, targetUser.getId())
                 .orElseThrow(() -> new IllegalArgumentException("User is not a member"));
 
+        if (environment.getHost().getId().equals(targetUser.getId())) {
+            throw new IllegalArgumentException("Owner role cannot be changed here");
+        }
+
+        member.setRole(mapRole(request.role()));
+        if (member.getRole() == EnvironmentMember.Role.CO_HOST) {
+            member.setCanInteractWithAi(true);
+        }
+
+        EnvironmentMember savedMember = memberRepository.save(member);
+        MemberResponse response = MemberResponse.from(savedMember, false);
+
+        centrifugoService.publishEnvironmentEvent(environmentId, new java.util.HashMap<>() {{
+            put("type", "member_role_updated");
+            put("username", savedMember.getUser().getUsername());
+            put("role", response.role());
+            put("owner", response.owner());
+            put("canInteractWithAi", response.canInteractWithAi());
+        }});
+
+        return response;
+    }
+
+    /**
+     * Owner or co-host updates whether a member can interact with the AI.
+     */
+    @Transactional
+    public MemberResponse updateMemberPermission(UUID environmentId,
+                                                 UpdatePermissionRequest request,
+                                                 User requestingUser) {
+        Environment environment = assertCanManageEnvironment(environmentId, requestingUser);
+
+        User targetUser = userRepository.findByUsername(request.username())
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+
+        if (environment.getHost().getId().equals(targetUser.getId())) {
+            throw new IllegalArgumentException("Owner always has AI access");
+        }
+
+        EnvironmentMember member = memberRepository
+                .findByEnvironmentIdAndUserId(environmentId, targetUser.getId())
+                .orElseThrow(() -> new IllegalArgumentException("User is not a member"));
+
+        if (member.getRole() == EnvironmentMember.Role.CO_HOST && !request.canInteractWithAi()) {
+            throw new IllegalArgumentException("Co-hosts must retain AI access");
+        }
+
         member.setCanInteractWithAi(request.canInteractWithAi());
-        return MemberResponse.from(memberRepository.save(member));
+        EnvironmentMember savedMember = memberRepository.save(member);
+        MemberResponse response = MemberResponse.from(savedMember, false);
+
+        centrifugoService.publishEnvironmentEvent(environmentId, new java.util.HashMap<>() {{
+            put("type", "member_permission_updated");
+            put("username", savedMember.getUser().getUsername());
+            put("role", response.role());
+            put("owner", response.owner());
+            put("canInteractWithAi", response.canInteractWithAi());
+        }});
+
+        return response;
     }
 
     /**
@@ -126,14 +237,38 @@ public class EnvironmentService {
         }
     }
 
-    private void assertIsHost(UUID environmentId, User user) {
+    private Environment assertCanManageEnvironment(UUID environmentId, User user) {
+        Environment environment = environmentRepository.findById(environmentId)
+                .orElseThrow(() -> new IllegalArgumentException("Environment not found"));
+
         EnvironmentMember member = memberRepository
                 .findByEnvironmentIdAndUserId(environmentId, user.getId())
                 .orElseThrow(() -> new SecurityException("You are not a member"));
 
-        if (member.getRole() != EnvironmentMember.Role.HOST) {
-            throw new SecurityException("Only the host can do this");
+        if (environment.getHost().getId().equals(user.getId())
+                || member.getRole() == EnvironmentMember.Role.CO_HOST) {
+            return environment;
         }
+
+        throw new SecurityException("Only the owner or a co-host can do this");
+    }
+
+    private Environment assertIsOwner(UUID environmentId, User user) {
+        Environment environment = environmentRepository.findById(environmentId)
+                .orElseThrow(() -> new IllegalArgumentException("Environment not found"));
+
+        if (!environment.getHost().getId().equals(user.getId())) {
+            throw new SecurityException("Only the environment owner can do this");
+        }
+
+        return environment;
+    }
+
+    private EnvironmentMember.Role mapRole(UpdateMemberRoleRequest.Role role) {
+        return switch (role) {
+            case CO_HOST -> EnvironmentMember.Role.CO_HOST;
+            case MEMBER -> EnvironmentMember.Role.MEMBER;
+        };
     }
 
     private String generateUniqueInviteCode() {

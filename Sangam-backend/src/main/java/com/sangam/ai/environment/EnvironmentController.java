@@ -64,6 +64,28 @@ public class EnvironmentController {
                 environmentService.getMembers(environmentId, currentUser)));
     }
 
+    @PostMapping("/{environmentId}/members")
+    public ResponseEntity<ApiResponse<MemberResponse>> addMember(
+            @PathVariable UUID environmentId,
+            @Valid @RequestBody AddMemberRequest request,
+            @AuthenticationPrincipal User currentUser) {
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(
+                environmentService.addMemberByUsername(
+                        environmentId, request, currentUser)));
+    }
+
+    @PatchMapping("/{environmentId}/members/role")
+    public ResponseEntity<ApiResponse<MemberResponse>> updateMemberRole(
+            @PathVariable UUID environmentId,
+            @Valid @RequestBody UpdateMemberRoleRequest request,
+            @AuthenticationPrincipal User currentUser) {
+
+        return ResponseEntity.ok(ApiResponse.ok(
+                environmentService.updateMemberRole(
+                        environmentId, request, currentUser)));
+    }
+
     @PatchMapping("/{environmentId}/members/permissions")
     public ResponseEntity<ApiResponse<MemberResponse>> updatePermission(
             @PathVariable UUID environmentId,

@@ -28,7 +28,8 @@ public class Session {
 
     private String title;
 
-    @Enumerated(EnumType.STRING)
+    @Builder.Default
+    @Convert(converter = SessionStatusConverter.class)
     @Column(nullable = false)
     private Status status = Status.OPEN;
 

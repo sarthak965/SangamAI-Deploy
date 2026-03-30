@@ -8,14 +8,16 @@ public record MemberResponse(
         String username,
         String displayName,
         String role,
+        boolean owner,
         boolean canInteractWithAi
 ) {
-    public static MemberResponse from(EnvironmentMember member) {
+    public static MemberResponse from(EnvironmentMember member, boolean isOwner) {
         return new MemberResponse(
                 member.getUser().getId(),
                 member.getUser().getUsername(),
                 member.getUser().getDisplayName(),
-                member.getRole().name(),
+                isOwner ? "OWNER" : member.getRole().name(),
+                isOwner,
                 member.isCanInteractWithAi()
         );
     }

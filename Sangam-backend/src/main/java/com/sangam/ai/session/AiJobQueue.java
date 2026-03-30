@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RBlockingQueue;
 import org.redisson.api.RedissonClient;
+import org.redisson.codec.TypedJsonJacksonCodec;
 import org.springframework.stereotype.Component;
 
 @Slf4j
@@ -12,11 +13,13 @@ import org.springframework.stereotype.Component;
 public class AiJobQueue {
 
     private static final String QUEUE_NAME = "sangamai:ai-jobs";
+    private static final TypedJsonJacksonCodec AI_JOB_CODEC =
+            new TypedJsonJacksonCodec(AiJob.class);
 
     private final RedissonClient redissonClient;
 
     private RBlockingQueue<AiJob> getQueue() {
-        return redissonClient.getBlockingQueue(QUEUE_NAME);
+        return redissonClient.getBlockingQueue(QUEUE_NAME, AI_JOB_CODEC);
     }
 
     /**

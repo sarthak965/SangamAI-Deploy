@@ -32,6 +32,7 @@ public class EnvironmentMember {
     @Column(nullable = false, length = 20)
     private Role role;
 
+    @Builder.Default
     @Column(nullable = false)
     private boolean canInteractWithAi = false;
 
@@ -44,6 +45,6 @@ public class EnvironmentMember {
     }
 
     public enum Role {
-        HOST, MEMBER
+        CO_HOST, MEMBER
     }
 }
