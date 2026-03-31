@@ -1,18 +1,23 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-import type { CurrentUser } from "../types";
+import type { CurrentUser, ProjectResponse, SoloChatSummaryResponse } from "../types";
 import { useTheme } from "../lib/theme";
-import type { SoloRecentChat } from "../pages/HomePage";
+import { api } from "../lib/api";
+import ChatOverflowMenu from "./ChatOverflowMenu";
 
 export default function AppShell({
+  token,
   me,
   onLogout,
+  onWorkspaceChanged,
   recentChats,
   children,
 }: {
+  token: string;
   me: CurrentUser;
   onLogout: () => void;
-  recentChats: SoloRecentChat[];
+  onWorkspaceChanged: () => Promise<void>;
+  recentChats: SoloChatSummaryResponse[];
   children: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -22,6 +27,7 @@ export default function AppShell({
   const navigate = useNavigate();
   const isMobile = typeof window !== "undefined" && window.innerWidth <= 1024;
   const showSidebar = mobileOpen || !collapsed;
+  const [projects, setProjects] = useState<ProjectResponse[]>([]);
 
   const toggleSidebar = () => {
     if (isMobile) {
@@ -36,6 +42,10 @@ export default function AppShell({
   useEffect(() => {
     closeMobile();
   }, [location.pathname]);
+
+  useEffect(() => {
+    api.listProjects(token).then(setProjects).catch(() => setProjects([]));
+  }, [token, recentChats]);
 
   return (
     <div className="workspace-layout">
@@ -99,6 +109,13 @@ export default function AppShell({
               <span>Projects</span>
             </NavLink>
             <NavLink
+              to="/app/history"
+              className={({ isActive }) => `workspace-nav-link ${isActive ? "active" : ""}`}
+            >
+              <span className="workspace-nav-icon">⌕</span>
+              <span>History</span>
+            </NavLink>
+            <NavLink
               to="/app/environments"
               className={({ isActive }) => `workspace-nav-link ${isActive ? "active" : ""}`}
             >
@@ -116,15 +133,29 @@ export default function AppShell({
                 </div>
               ) : (
                 recentChats.map((chat) => (
-                  <button
-                    key={chat.id}
-                    className="workspace-recent-item"
-                    type="button"
-                    onClick={() => navigate("/app")}
-                  >
-                    <strong>{chat.title}</strong>
-                    <span>{chat.preview}</span>
-                  </button>
+                  <div key={chat.id} className="workspace-recent-row">
+                    <button
+                      className="workspace-recent-item"
+                      type="button"
+                      onClick={() => navigate(`/app/chats/${chat.id}`)}
+                    >
+                      <strong>
+                        {chat.pinned && <span className="workspace-recent-pin">📌</span>}
+                        {chat.title}
+                      </strong>
+                    </button>
+                    <ChatOverflowMenu
+                      token={token}
+                      chat={chat}
+                      projects={projects}
+                      onChanged={onWorkspaceChanged}
+                      onDeleted={(deletedId) => {
+                        if (location.pathname.endsWith(deletedId)) {
+                          navigate("/app/history");
+                        }
+                      }}
+                    />
+                  </div>
                 ))
               )}
             </div>

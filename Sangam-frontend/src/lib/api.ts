@@ -5,8 +5,11 @@ import type {
   CurrentUser,
   EnvironmentResponse,
   MemberResponse,
+  ProjectResponse,
   SessionListItem,
   SessionSnapshotDto,
+  SoloChatDetailResponse,
+  SoloChatSummaryResponse,
 } from "../types";
 
 const API_BASE_URL =
@@ -34,11 +37,11 @@ async function request<T>(
 
   const payload = (await response.json().catch(() => null)) as ApiResponse<T> | null;
 
-  if (!response.ok || !payload?.success || payload.data === undefined) {
+  if (!response.ok || !payload?.success) {
     throw new Error(payload?.message ?? "Request failed");
   }
 
-  return payload.data;
+  return payload.data as T;
 }
 
 export const api = {
@@ -65,6 +68,119 @@ export const api = {
 
   getMe(token: string) {
     return request<CurrentUser>("/api/users/me", {}, token);
+  },
+
+  listProjects(token: string) {
+    return request<ProjectResponse[]>("/api/workspace/projects", {}, token);
+  },
+
+  createProject(
+    token: string,
+    body: {
+      name: string;
+      description: string;
+      systemInstructions: string;
+      knowledgeContext: string;
+    },
+  ) {
+    return request<ProjectResponse>(
+      "/api/workspace/projects",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      token,
+    );
+  },
+
+  updateProject(
+    token: string,
+    projectId: string,
+    body: {
+      name: string;
+      description: string;
+      systemInstructions: string;
+      knowledgeContext: string;
+    },
+  ) {
+    return request<ProjectResponse>(
+      `/api/workspace/projects/${projectId}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      },
+      token,
+    );
+  },
+
+  listSoloChats(token: string) {
+    return request<SoloChatSummaryResponse[]>("/api/workspace/chats", {}, token);
+  },
+
+  listRecentSoloChats(token: string, limit = 10) {
+    return request<SoloChatSummaryResponse[]>(
+      `/api/workspace/chats/recent?limit=${limit}`,
+      {},
+      token,
+    );
+  },
+
+  createSoloChat(
+    token: string,
+    body: { title?: string; projectId?: string | null } = {},
+  ) {
+    return request<SoloChatDetailResponse>(
+      "/api/workspace/chats",
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      token,
+    );
+  },
+
+  getSoloChat(token: string, chatId: string) {
+    return request<SoloChatDetailResponse>(
+      `/api/workspace/chats/${chatId}`,
+      {},
+      token,
+    );
+  },
+
+  updateSoloChat(
+    token: string,
+    chatId: string,
+    body: { title?: string; projectId?: string | null; pinned?: boolean },
+  ) {
+    return request<SoloChatDetailResponse>(
+      `/api/workspace/chats/${chatId}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      },
+      token,
+    );
+  },
+
+  deleteSoloChat(token: string, chatId: string) {
+    return request<null>(
+      `/api/workspace/chats/${chatId}`,
+      {
+        method: "DELETE",
+      },
+      token,
+    );
+  },
+
+  sendSoloMessage(token: string, chatId: string, content: string) {
+    return request<SoloChatDetailResponse>(
+      `/api/workspace/chats/${chatId}/messages`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      },
+      token,
+    );
   },
 
   listEnvironments(token: string) {

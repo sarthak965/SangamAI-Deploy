@@ -1464,13 +1464,14 @@ input::placeholder, textarea::placeholder {
 .composer-box textarea {
   flex: 1;
   min-height: 48px;
-  max-height: 200px;
+  max-height: 120px;
   resize: none;
   border-radius: 1.1rem;
   padding: 0.8rem 0.9rem;
   border: none;
   background: transparent;
   box-shadow: none;
+  overflow-y: hidden;
 }
 
 .composer-box .btn-primary {
@@ -2191,32 +2192,46 @@ input::placeholder, textarea::placeholder {
   gap: 0.45rem;
 }
 
+.workspace-recent-row {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  border-radius: 10px;
+}
+
 .workspace-recent-item,
 .workspace-recent-empty {
   width: 100%;
   text-align: left;
-  padding: 0.8rem 0.9rem;
-  border-radius: 15px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 0.55rem 0.3rem;
+  border-radius: 10px;
+  background: transparent;
+  border: none;
   color: rgba(247, 242, 237, 0.72);
 }
 
 .workspace-recent-item strong {
   display: block;
-  font-size: 0.92rem;
+  font-size: 0.96rem;
   color: #fff7f0;
-  margin-bottom: 0.18rem;
   font-weight: 600;
 }
 
 .workspace-recent-item span {
-  display: block;
-  font-size: 0.8rem;
-  color: rgba(247, 242, 237, 0.55);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: none;
+}
+
+.workspace-recent-item:hover {
+  color: #ffffff;
+}
+
+.workspace-recent-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.workspace-recent-pin {
+  margin-right: 0.35rem;
+  font-size: 0.78rem;
 }
 
 .workspace-sidebar-foot {
@@ -2314,15 +2329,18 @@ input::placeholder, textarea::placeholder {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 2rem;
+  gap: 1rem;
   padding: 1rem 0 2rem;
+  max-width: 1120px;
+  margin: 0 auto;
+  width: 100%;
 }
 
 .solo-home-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
+  justify-content: center;
+  gap: 0.75rem;
 }
 
 .solo-home-badge,
@@ -2330,38 +2348,39 @@ input::placeholder, textarea::placeholder {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.55rem 0.95rem;
+  padding: 0.42rem 0.82rem;
   border-radius: 999px;
   border: 1px solid var(--border-light);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-secondary);
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   font-weight: 600;
 }
 
 .solo-hero {
-  max-width: 760px;
+  max-width: 1120px;
   margin: 0 auto;
   width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.6rem;
+  gap: 1rem;
   text-align: center;
 }
 
 .solo-hero-copy h1 {
-  font-size: clamp(2.6rem, 5vw, 4.3rem);
-  line-height: 1.05;
-  margin-bottom: 0.9rem;
-  font-family: "Georgia", "Times New Roman", serif;
+  font-size: clamp(2.1rem, 3.8vw, 3rem);
+  line-height: 1.15;
+  margin-bottom: 0;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  font-weight: 600;
   letter-spacing: -0.03em;
 }
 
 .solo-hero-copy p {
   color: var(--text-secondary);
-  font-size: 1.02rem;
-  max-width: 680px;
+  font-size: 0.98rem;
+  max-width: 600px;
 }
 
 .solo-eyebrow,
@@ -2374,48 +2393,119 @@ input::placeholder, textarea::placeholder {
 }
 
 .solo-composer {
-  width: min(100%, 680px);
-  padding: 1rem 1rem 0.85rem;
+  width: min(100%, 780px);
+  min-height: 54px;
+  padding: 0.4rem 0.45rem 0.4rem 0.55rem;
   border-radius: 28px;
   border: 1px solid var(--border-light);
-  background: color-mix(in srgb, var(--bg-secondary) 88%, transparent);
-  box-shadow: 0 24px 50px rgba(0, 0, 0, 0.12);
+  background: color-mix(in srgb, var(--bg-secondary) 96%, transparent);
+  box-shadow: none;
   text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .solo-composer textarea {
+  flex: 1;
+  width: auto;
   border: none;
   background: transparent;
   box-shadow: none;
   resize: none;
-  min-height: 118px;
-  padding: 0.4rem 0.2rem;
-  font-size: 1.05rem;
+  min-height: 22px;
+  max-height: 96px;
+  padding: 0.35rem 0.2rem;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  overflow-y: hidden;
 }
 
-.solo-composer-footer {
+.solo-composer-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding-top: 0.75rem;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.solo-composer-icon,
+.solo-composer-send {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.solo-composer-icon {
+  color: var(--accent);
+  background: transparent;
+}
+
+.solo-composer-icon-left {
+  font-size: 1.35rem;
+  line-height: 1;
+  color: #ffffff;
+}
+
+.solo-composer-icon svg,
+.solo-composer-send svg {
+  width: 18px;
+  height: 18px;
+}
+
+.solo-composer-send {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.solo-composer-send:disabled {
+  opacity: 0.55;
+}
+
+.solo-composer-note {
+  margin-top: -0.35rem;
+  font-size: 0.78rem;
   color: var(--text-muted);
-  font-size: 0.84rem;
 }
 
 .solo-suggestions {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 0.75rem;
+  gap: 0.6rem;
 }
 
 .solo-suggestion-chip {
-  padding: 0.78rem 1rem;
+  padding: 0.62rem 0.9rem;
   border-radius: 999px;
   border: 1px solid var(--border-light);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.solo-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.55rem;
+}
+
+.solo-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 112px;
+  padding: 0.5rem 0.8rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-light);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
 .solo-recent-grid {
@@ -2462,6 +2552,16 @@ input::placeholder, textarea::placeholder {
   padding: 1rem;
 }
 
+.solo-recent-card-clickable {
+  cursor: pointer;
+  transition: transform var(--transition), border-color var(--transition);
+}
+
+.solo-recent-card-clickable:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+}
+
 .solo-recent-time {
   color: var(--text-muted);
   font-size: 0.75rem;
@@ -2485,6 +2585,391 @@ input::placeholder, textarea::placeholder {
   max-width: 760px;
 }
 
+.history-page {
+  max-width: 980px;
+}
+
+.history-toolbar {
+  margin-bottom: 1rem;
+}
+
+.history-toolbar input {
+  max-width: 360px;
+  background: color-mix(in srgb, var(--bg-secondary) 94%, transparent);
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.history-item:last-child {
+  border-bottom: none;
+}
+
+.history-item-main {
+  flex: 1;
+  text-align: left;
+}
+
+.history-item-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-primary);
+  font-weight: 500;
+  font-size: 1rem;
+}
+
+.history-pin-mark {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.history-item-meta {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  margin-top: 0.18rem;
+}
+
+.history-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.history-project-select {
+  min-width: 150px;
+  width: auto;
+  padding: 0.5rem 0.8rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-secondary) 95%, transparent);
+}
+
+.history-delete {
+  color: var(--danger);
+}
+
+.chat-overflow {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.chat-overflow-trigger {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity var(--transition), background var(--transition), color var(--transition);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
+.workspace-recent-row:hover .chat-overflow-trigger,
+.history-item:hover .chat-overflow-trigger,
+.chat-overflow-trigger:focus-visible,
+.chat-overflow-trigger[aria-expanded="true"] {
+  opacity: 1;
+}
+
+.chat-overflow-trigger:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-primary);
+}
+
+.chat-overflow-menu {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  min-width: 220px;
+  padding: 0.4rem;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--border-light) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 98%, transparent);
+  box-shadow: 0 22px 48px rgba(0, 0, 0, 0.34);
+  z-index: 30;
+  backdrop-filter: blur(20px);
+}
+
+.chat-overflow-menu button {
+  width: 100%;
+  text-align: left;
+  padding: 0.78rem 0.85rem;
+  border-radius: 13px;
+  color: var(--text-primary);
+  font-size: 0.94rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-weight: 500;
+}
+
+.chat-overflow-menu button:hover {
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.chat-overflow-menu button + button:not(.danger) {
+  margin-top: 0.08rem;
+}
+
+.chat-overflow-menu button.danger {
+  color: var(--danger);
+  margin-top: 0.25rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid color-mix(in srgb, var(--border-light) 55%, transparent);
+}
+
+.chat-overflow-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(5, 5, 8, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 1rem;
+}
+
+.dialog-card {
+  width: min(100%, 470px);
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--border-light) 72%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 98%, transparent);
+  box-shadow: 0 30px 72px rgba(0, 0, 0, 0.38);
+  padding: 1.5rem 1.5rem 1.1rem;
+}
+
+.dialog-head {
+  margin-bottom: 0.95rem;
+}
+
+.dialog-card h3 {
+  font-size: 1.25rem;
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+.dialog-body {
+  margin-bottom: 1.2rem;
+}
+
+.dialog-body p {
+  color: var(--text-secondary);
+  font-size: 0.98rem;
+  line-height: 1.55;
+}
+
+.dialog-body strong {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+
+.dialog-input,
+.dialog-select {
+  background: color-mix(in srgb, var(--bg) 96%, transparent);
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  min-height: 50px;
+}
+
+.dialog-error {
+  margin-bottom: 1rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 14px;
+  border: 1px solid var(--error-border);
+  background: var(--error-bg);
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+}
+
+.dialog-actions .btn {
+  min-width: 90px;
+  padding: 0.72rem 1.2rem;
+}
+
+.dialog-actions .btn-secondary {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--border) 88%, transparent);
+}
+
+.dialog-danger {
+  background: var(--danger);
+  color: #fff;
+  box-shadow: none;
+}
+
+.solo-project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.solo-project-card {
+  text-align: left;
+  padding: 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--border-light);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.solo-project-card strong,
+.solo-project-card span {
+  display: block;
+}
+
+.solo-project-card strong {
+  margin-bottom: 0.25rem;
+}
+
+.solo-project-card span {
+  color: var(--text-secondary);
+}
+
+.project-layout {
+  display: grid;
+  grid-template-columns: minmax(340px, 420px) 1fr;
+  gap: 1.25rem;
+}
+
+.project-form-panel,
+.project-list-panel {
+  border-radius: 28px;
+  border: 1px solid var(--border-light);
+  background: color-mix(in srgb, var(--bg-secondary) 90%, transparent);
+  padding: 1.25rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.project-form-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.project-form-panel textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+
+.project-form-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.project-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+  border-radius: 20px;
+  border: 1px solid var(--border-light);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.project-card-copy h3 {
+  margin-bottom: 0.25rem;
+}
+
+.project-card-copy p {
+  color: var(--text-secondary);
+  margin-bottom: 0.4rem;
+}
+
+.project-card-copy span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.project-card-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.workspace-chat-page {
+  max-width: 880px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 3rem);
+}
+
+.workspace-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 1rem;
+}
+
+.workspace-chat-header h1 {
+  font-size: 1.5rem;
+  margin-bottom: 0.25rem;
+}
+
+.workspace-chat-header p {
+  color: var(--text-secondary);
+}
+
+.workspace-chat-thread {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.workspace-user-bubble {
+  max-width: min(78%, 680px);
+  margin-left: auto;
+  background: color-mix(in srgb, var(--bg-tertiary) 90%, transparent);
+  border: 1px solid var(--border-light);
+  border-radius: 1.5rem;
+  padding: 0.95rem 1.15rem;
+}
+
 @media (max-width: 1024px) {
   .workspace-sidebar {
     transform: translateX(-100%);
@@ -2506,6 +2991,19 @@ input::placeholder, textarea::placeholder {
   .solo-recent-grid {
     grid-template-columns: 1fr;
   }
+
+  .project-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .history-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .history-item-actions {
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 640px) {
@@ -2516,6 +3014,17 @@ input::placeholder, textarea::placeholder {
   }
 
   .solo-hero-copy h1 {
-    font-size: 2.4rem;
+    font-size: 2rem;
+  }
+
+  .project-card,
+  .workspace-chat-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .project-card-actions,
+  .project-form-actions {
+    flex-direction: column;
   }
 }

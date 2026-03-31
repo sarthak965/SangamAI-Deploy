@@ -18,6 +18,45 @@ export interface CurrentUser {
   email: string;
 }
 
+export interface ProjectResponse {
+  id: string;
+  name: string;
+  description: string | null;
+  systemInstructions: string;
+  knowledgeContext: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SoloChatMessageResponse {
+  id: string;
+  role: "USER" | "ASSISTANT" | "SYSTEM";
+  status: "STREAMING" | "COMPLETE";
+  content: string;
+  createdAt: string;
+}
+
+export interface SoloChatSummaryResponse {
+  id: string;
+  title: string;
+  pinned: boolean;
+  projectId: string | null;
+  projectName: string | null;
+  lastMessagePreview: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SoloChatDetailResponse {
+  id: string;
+  title: string;
+  pinned: boolean;
+  project: ProjectResponse | null;
+  createdAt: string;
+  updatedAt: string;
+  messages: SoloChatMessageResponse[];
+}
+
 export interface EnvironmentResponse {
   id: string;
   name: string;

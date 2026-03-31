@@ -71,6 +71,7 @@ export default function SessionPage({
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const hasScrolledToBottom = useRef(false);
   const refreshInFlight = useRef(false);
+  const composerTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   const selectedSession = useMemo(
     () => sessions.find((session) => session.sessionId === sessionId) ?? null,
@@ -315,6 +316,10 @@ export default function SessionPage({
     };
   }, []);
 
+  useEffect(() => {
+    autoSizeTextarea(composerTextareaRef.current, 48, 120);
+  }, [rootQuestion]);
+
   const withBusy = async (key: string, action: () => Promise<void>) => {
     setBusyKey(key);
     setError(null);
@@ -552,6 +557,7 @@ export default function SessionPage({
             }}
           >
             <textarea
+              ref={composerTextareaRef}
               value={rootQuestion}
               onChange={(e) => setRootQuestion(e.target.value)}
               placeholder={
@@ -1036,4 +1042,16 @@ function parseSingleBlock(content: string): RenderableBlock {
 
 function isCodeFenceBlock(content: string): boolean {
   return /^```[\w+-]*\n[\s\S]*```$/.test(content.trim());
+}
+
+function autoSizeTextarea(
+  element: HTMLTextAreaElement | null,
+  minHeight: number,
+  maxHeight: number,
+) {
+  if (!element) return;
+  element.style.height = `${minHeight}px`;
+  const nextHeight = Math.min(element.scrollHeight, maxHeight);
+  element.style.height = `${Math.max(minHeight, nextHeight)}px`;
+  element.style.overflowY = element.scrollHeight > maxHeight ? "auto" : "hidden";
 }
