@@ -75,10 +75,14 @@ public class AiStreamingService {
         messages.add(AiMessage.system("""
                 You are a collaborative AI assistant in SangamAI, a platform
                 where teams have shared AI conversations together in real time.
-                
-                Give clear, thoughtful responses. Use natural paragraph breaks
-                between distinct ideas. Do not use bullet points or headers
-                unless specifically asked.
+
+                Write clean, well-structured markdown.
+                Group related explanation into meaningful paragraphs instead of
+                one-sentence fragments.
+                If you include code, always wrap it in fenced code blocks using
+                triple backticks. Keep each code example in a single fenced block.
+                Do not split one code example across multiple blocks.
+                Use headings or bullet points only when they improve clarity.
                 """));
 
         List<ConversationNode> history = nodeRepository
@@ -112,18 +116,23 @@ public class AiStreamingService {
 
         messages.add(AiMessage.system(String.format("""
                 You are a collaborative AI assistant in SangamAI.
-                
+
                 Here is the full AI response given in this session:
                 --- BEGIN SESSION CONTEXT ---
                 %s
                 --- END SESSION CONTEXT ---
-                
+
                 The user is asking about this specific paragraph:
                 --- BEGIN PARAGRAPH ---
                 %s
                 --- END PARAGRAPH ---
-                
-                Answer focused on that paragraph. Use natural paragraph breaks.
+
+                Answer focused on that paragraph.
+                Write clean, well-structured markdown.
+                Group related explanation into meaningful paragraphs instead of
+                one-sentence fragments.
+                If you include code, always wrap it in a single fenced code block
+                using triple backticks and do not split that code across blocks.
                 """,
                 parentNode.getFullContent(),
                 targetParagraph.getContent()
@@ -145,33 +154,33 @@ public class AiStreamingService {
 
     private void streamResponse(ConversationNode node, List<AiMessage> messages) {
         StringBuilder fullContent = new StringBuilder();
-        StringBuilder currentParagraph = new StringBuilder();
-        final int[] paragraphIndex = {0};
+        StreamBlockParser parser = new StreamBlockParser();
+        final int[] blockIndex = {0};
 
         aiProvider.streamResponse(messages)
                 .doOnNext(chunk -> {
                     fullContent.append(chunk);
-                    currentParagraph.append(chunk);
                     centrifugoService.publishTokenChunk(node.getId(), chunk);
+                    parser.accept(chunk);
 
-                    if (isParagraphBoundary(currentParagraph.toString())) {
-                        String paraContent = currentParagraph.toString().trim();
-                        if (!paraContent.isEmpty()) {
-                            saveParagraph(node, paragraphIndex[0], paraContent);
-                            paragraphIndex[0]++;
+                    List<String> completedBlocks = parser.drainCompletedBlocks();
+                    if (!completedBlocks.isEmpty()) {
+                        for (String block : completedBlocks) {
+                            saveParagraph(node, blockIndex[0], block);
+                            blockIndex[0]++;
                         }
-                        currentParagraph.setLength(0);
 
                         // Flush fullContent to DB so polling clients see
-                        // the growing response even if they missed Centrifugo chunks
+                        // the growing response even if they missed Centrifugo chunks.
                         node.setFullContent(fullContent.toString());
                         nodeRepository.save(node);
                     }
                 })
                 .doOnComplete(() -> {
-                    String remaining = currentParagraph.toString().trim();
-                    if (!remaining.isEmpty()) {
-                        saveParagraph(node, paragraphIndex[0], remaining);
+                    List<String> remainingBlocks = parser.finish();
+                    for (String block : remainingBlocks) {
+                        saveParagraph(node, blockIndex[0], block);
+                        blockIndex[0]++;
                     }
                     node.setFullContent(fullContent.toString());
                     node.setStatus(ConversationNode.Status.COMPLETE);
@@ -205,7 +214,263 @@ public class AiStreamingService {
                 node.getId(), saved.getId(), index, content);
     }
 
-    private boolean isParagraphBoundary(String text) {
-        return text.contains("\n\n") || text.matches("(?s).*\n#{1,6} .*");
+    private static final class StreamBlockParser {
+        private static final int SHORT_INTRO_WORD_LIMIT = 18;
+        private static final int SHORT_INTRO_CHAR_LIMIT = 140;
+
+        private final List<String> completedBlocks = new ArrayList<>();
+        private final List<RawBlock> pendingBlocks = new ArrayList<>();
+        private final StringBuilder currentBlock = new StringBuilder();
+        private final StringBuilder currentLine = new StringBuilder();
+        private RawBlockType currentType;
+        private boolean inCodeFence = false;
+
+        void accept(String chunk) {
+            for (int i = 0; i < chunk.length(); i++) {
+                char ch = chunk.charAt(i);
+                currentLine.append(ch);
+
+                if (ch == '\n') {
+                    flushLine();
+                }
+            }
+        }
+
+        List<String> drainCompletedBlocks() {
+            List<String> blocks = new ArrayList<>(completedBlocks);
+            completedBlocks.clear();
+            return blocks;
+        }
+
+        List<String> finish() {
+            if (currentLine.length() > 0) {
+                flushLine();
+            }
+            flushCurrentBlock();
+            resolvePendingBlocks(true);
+            return drainCompletedBlocks();
+        }
+
+        private void flushLine() {
+            String line = currentLine.toString();
+            currentLine.setLength(0);
+
+            String trimmed = line.trim();
+            if (inCodeFence) {
+                currentBlock.append(line);
+                if (trimmed.startsWith("```")) {
+                    inCodeFence = false;
+                    flushCurrentBlock();
+                }
+                return;
+            }
+
+            if (trimmed.startsWith("```")) {
+                flushCurrentBlock();
+                currentType = RawBlockType.CODE;
+                inCodeFence = true;
+                currentBlock.append(line);
+                return;
+            }
+
+            if (trimmed.isEmpty()) {
+                flushCurrentBlock();
+                return;
+            }
+
+            RawBlockType nextType = classifyLine(trimmed);
+
+            if (nextType == RawBlockType.HEADING) {
+                flushCurrentBlock();
+                currentType = RawBlockType.HEADING;
+                currentBlock.append(line);
+                flushCurrentBlock();
+                return;
+            }
+
+            if (currentType == null) {
+                currentType = nextType;
+                currentBlock.append(line);
+                return;
+            }
+
+            if (canContinueCurrentBlock(nextType, trimmed, line)) {
+                currentBlock.append(line);
+                return;
+            }
+
+            flushCurrentBlock();
+            currentType = nextType;
+            currentBlock.append(line);
+        }
+
+        private void flushCurrentBlock() {
+            String block = normalizeBlock(currentBlock.toString());
+            currentBlock.setLength(0);
+            RawBlockType blockType = currentType;
+            currentType = null;
+
+            if (!block.isEmpty() && blockType != null) {
+                pendingBlocks.add(new RawBlock(blockType, block));
+                resolvePendingBlocks(false);
+            }
+        }
+
+        private RawBlockType classifyLine(String trimmed) {
+            if (trimmed.matches("#{1,6}\\s+.*")) {
+                return RawBlockType.HEADING;
+            }
+            if (trimmed.matches("[-*+]\\s+.*") || trimmed.matches("\\d+\\.\\s+.*")) {
+                return RawBlockType.LIST;
+            }
+            if (trimmed.startsWith(">")) {
+                return RawBlockType.QUOTE;
+            }
+            return RawBlockType.TEXT;
+        }
+
+        private boolean canContinueCurrentBlock(
+                RawBlockType nextType, String trimmed, String originalLine) {
+            if (currentType == RawBlockType.TEXT) {
+                return nextType == RawBlockType.TEXT;
+            }
+            if (currentType == RawBlockType.LIST) {
+                return nextType == RawBlockType.LIST || isListContinuation(originalLine, trimmed);
+            }
+            if (currentType == RawBlockType.QUOTE) {
+                return nextType == RawBlockType.QUOTE;
+            }
+            return false;
+        }
+
+        private boolean isListContinuation(String originalLine, String trimmed) {
+            if (trimmed.isEmpty()) {
+                return false;
+            }
+            if (trimmed.matches("[-*+]\\s+.*") || trimmed.matches("\\d+\\.\\s+.*")) {
+                return true;
+            }
+            return Character.isWhitespace(originalLine.charAt(0));
+        }
+
+        private String normalizeBlock(String raw) {
+            String block = raw.strip();
+            if (block.isEmpty()) {
+                return "";
+            }
+
+            return block.replace("\r\n", "\n");
+        }
+
+        private void resolvePendingBlocks(boolean finalPass) {
+            int index = 0;
+
+            while (index < pendingBlocks.size()) {
+                if (!finalPass && index >= pendingBlocks.size() - 1) {
+                    break;
+                }
+
+                RawBlock current = pendingBlocks.get(index);
+
+                if (current.type() == RawBlockType.HEADING) {
+                    if (index + 1 >= pendingBlocks.size()) {
+                        break;
+                    }
+
+                    StringBuilder unit = new StringBuilder(current.content());
+                    int consumed = 1;
+
+                    RawBlock next = pendingBlocks.get(index + 1);
+                    unit.append("\n\n").append(next.content());
+                    consumed++;
+
+                    if (shouldMergeThirdBlockAfterHeading(next, index + 2)) {
+                        unit.append("\n\n").append(pendingBlocks.get(index + 2).content());
+                        consumed++;
+                    }
+
+                    completedBlocks.add(unit.toString());
+                    pendingBlocks.subList(index, index + consumed).clear();
+                    continue;
+                }
+
+                if (isShortIntro(current)) {
+                    if (index + 1 >= pendingBlocks.size()) {
+                        break;
+                    }
+
+                    RawBlock next = pendingBlocks.get(index + 1);
+                    if (next.type() == RawBlockType.HEADING && index + 2 < pendingBlocks.size()) {
+                        StringBuilder unit = new StringBuilder(current.content())
+                                .append("\n\n")
+                                .append(next.content())
+                                .append("\n\n")
+                                .append(pendingBlocks.get(index + 2).content());
+                        pendingBlocks.subList(index, index + 3).clear();
+                        completedBlocks.add(unit.toString());
+                        continue;
+                    }
+
+                    if (shouldMergeShortIntroWithNext(next)) {
+                        String unit = current.content() + "\n\n" + next.content();
+                        pendingBlocks.subList(index, index + 2).clear();
+                        completedBlocks.add(unit);
+                        continue;
+                    }
+                }
+
+                completedBlocks.add(current.content());
+                pendingBlocks.remove(index);
+            }
+
+            if (finalPass) {
+                for (RawBlock block : pendingBlocks) {
+                    completedBlocks.add(block.content());
+                }
+                pendingBlocks.clear();
+            }
+        }
+
+        private boolean shouldMergeThirdBlockAfterHeading(RawBlock next, int thirdIndex) {
+            if (thirdIndex >= pendingBlocks.size()) {
+                return false;
+            }
+
+            RawBlock third = pendingBlocks.get(thirdIndex);
+            return isShortIntro(next)
+                    && (third.type() == RawBlockType.CODE
+                    || third.type() == RawBlockType.LIST
+                    || third.type() == RawBlockType.QUOTE
+                    || third.type() == RawBlockType.TEXT);
+        }
+
+        private boolean shouldMergeShortIntroWithNext(RawBlock next) {
+            return next.type() == RawBlockType.CODE
+                    || next.type() == RawBlockType.LIST
+                    || next.type() == RawBlockType.QUOTE;
+        }
+
+        private boolean isShortIntro(RawBlock block) {
+            if (block.type() != RawBlockType.TEXT) {
+                return false;
+            }
+
+            String normalized = block.content().replace('\n', ' ').trim();
+            int wordCount = normalized.isEmpty() ? 0 : normalized.split("\\s+").length;
+            return !normalized.contains(".\n")
+                    && wordCount <= SHORT_INTRO_WORD_LIMIT
+                    && normalized.length() <= SHORT_INTRO_CHAR_LIMIT;
+        }
+
+        private enum RawBlockType {
+            TEXT,
+            HEADING,
+            LIST,
+            QUOTE,
+            CODE
+        }
+
+        private record RawBlock(RawBlockType type, String content) {
+        }
     }
 }

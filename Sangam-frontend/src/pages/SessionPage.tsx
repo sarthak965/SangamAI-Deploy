@@ -1,5 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import Prism from "prismjs";
+import "prismjs/components/prism-java";
+import "prismjs/components/prism-javascript";
+import "prismjs/components/prism-typescript";
+import "prismjs/components/prism-jsx";
+import "prismjs/components/prism-tsx";
+import "prismjs/components/prism-python";
+import "prismjs/components/prism-c";
+import "prismjs/components/prism-cpp";
+import "prismjs/components/prism-csharp";
+import "prismjs/components/prism-go";
+import "prismjs/components/prism-rust";
+import "prismjs/components/prism-sql";
+import "prismjs/components/prism-json";
+import "prismjs/components/prism-bash";
 import { api } from "../lib/api";
 import { realtimeManager } from "../lib/realtime";
 import type {
@@ -17,8 +34,16 @@ import type {
   StreamingNodeState,
 } from "../types";
 
-/* ── max depth for paragraph drill-down ────────────────────── */
 const MAX_THREAD_DEPTH = 3;
+
+type ViewState =
+  | { type: "root"; title: string }
+  | { type: "paragraph"; nodeId: string; paragraphId: string }
+  | { type: "node"; nodeId: string; question: string };
+
+type RenderableBlock =
+  | { type: "text"; content: string }
+  | { type: "code"; content: string; language: string | null };
 
 export default function SessionPage({
   token,
@@ -37,33 +62,25 @@ export default function SessionPage({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rootQuestion, setRootQuestion] = useState("");
+  const [viewStack, setViewStack] = useState<ViewState[]>([{ type: "root", title: "Root" }]);
 
-  /* thread panel state */
-  const [threadOpen, setThreadOpen] = useState(false);
-  const [threadParagraph, setThreadParagraph] = useState<{
-    nodeId: string;
-    paragraph: ParagraphDto;
-    parentNode: ConversationNodeDto;
-  } | null>(null);
-
+  const currentView = viewStack[viewStack.length - 1];
   const sessionUnsub = useRef<(() => void) | null>(null);
   const envUnsub = useRef<(() => void) | null>(null);
   const nodeUnsubs = useRef<Record<string, () => void>>({});
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const hasScrolledToBottom = useRef(false);
+  const refreshInFlight = useRef(false);
 
   const selectedSession = useMemo(
-    () => sessions.find((s) => s.sessionId === sessionId) ?? null,
+    () => sessions.find((session) => session.sessionId === sessionId) ?? null,
     [sessions, sessionId],
   );
 
-  const currentMember = members.find((m) => m.username === me.username) ?? null;
-  const canAskRoot =
-    currentMember?.role === "OWNER" || currentMember?.role === "CO_HOST";
-  const canAskParagraph =
-    canAskRoot || Boolean(currentMember?.canInteractWithAi);
+  const currentMember = members.find((member) => member.username === me.username) ?? null;
+  const canAskRoot = currentMember?.role === "OWNER" || currentMember?.role === "CO_HOST";
+  const canAskParagraph = canAskRoot || Boolean(currentMember?.canInteractWithAi);
 
-  /* ── data loading ──────────────────────────────────────── */
   const loadAll = async () => {
     if (!environmentId || !sessionId) return;
     const [envs, mems, sess, snap] = await Promise.all([
@@ -72,53 +89,82 @@ export default function SessionPage({
       api.listSessions(token, environmentId),
       api.getSnapshot(token, sessionId),
     ]);
-    setEnvironment(envs.find((e) => e.id === environmentId) ?? null);
+    setEnvironment(envs.find((env) => env.id === environmentId) ?? null);
     setMembers(mems);
     setSessions(sess);
     setSnapshot(snap);
+    setStreamingNodes((current) => reconcileStreamingNodes(current, snap));
   };
 
-  const attachNode = async (
-    nodeId: string,
-    meta?: Partial<StreamingNodeState>,
-  ) => {
+  const refreshSnapshot = async () => {
+    if (!sessionId) return;
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
+    try {
+      const snap = await api.getSnapshot(token, sessionId);
+      setSnapshot(snap);
+      setStreamingNodes((current) => reconcileStreamingNodes(current, snap));
+    } finally {
+      refreshInFlight.current = false;
+    }
+  };
+
+  const attachNode = async (nodeId: string, meta?: Partial<StreamingNodeState>) => {
     if (nodeUnsubs.current[nodeId]) return;
 
-    setStreamingNodes((s) => ({
-      ...s,
-      [nodeId]: { nodeId, content: "", paragraphs: [], done: false, ...meta },
+    setStreamingNodes((current) => ({
+      ...current,
+      [nodeId]: current[nodeId] ?? { nodeId, content: "", paragraphs: [], done: false, ...meta },
     }));
 
     const unsub = await realtimeManager.subscribe<NodeStreamEvent>(
       token,
       `node:${nodeId}:stream`,
       (data) => {
-        setStreamingNodes((s) => {
-          const cur = s[nodeId] ?? {
+        setStreamingNodes((current) => {
+          const active = current[nodeId] ?? {
             nodeId,
             content: "",
             paragraphs: [],
             done: false,
             ...meta,
           };
-          if (data.type === "chunk")
-            return { ...s, [nodeId]: { ...cur, content: cur.content + data.content } };
-          if (data.type === "paragraph_ready")
+
+          if (data.type === "chunk") {
+            setSnapshot((prev) => (prev ? appendNodeContent(prev, nodeId, data.content) : prev));
+            return { ...current, [nodeId]: { ...active, content: active.content + data.content } };
+          }
+
+          if (data.type === "paragraph_ready") {
+            setSnapshot((prev) =>
+              prev
+                ? upsertParagraph(prev, nodeId, {
+                    id: data.paragraphId,
+                    index: data.index,
+                    content: data.content,
+                    childNodeCount: getParagraphChildCount(prev, nodeId, data.paragraphId),
+                  })
+                : prev,
+            );
             return {
-              ...s,
+              ...current,
               [nodeId]: {
-                ...cur,
+                ...active,
                 paragraphs: [
-                  ...cur.paragraphs.filter((p) => p.id !== data.paragraphId),
+                  ...active.paragraphs.filter((paragraph) => paragraph.id !== data.paragraphId),
                   { id: data.paragraphId, index: data.index, content: data.content },
                 ].sort((a, b) => a.index - b.index),
               },
             };
-          if (data.type === "done") {
-            void loadAll().catch(() => {});
-            return { ...s, [nodeId]: { ...cur, done: true } };
           }
-          return s;
+
+          if (data.type === "done") {
+            setSnapshot((prev) => (prev ? updateNodeStatus(prev, nodeId, "COMPLETE") : prev));
+            void refreshSnapshot().catch((e: Error) => setError(e.message));
+            return { ...current, [nodeId]: { ...active, done: true } };
+          }
+
+          return current;
         });
       },
     );
@@ -129,20 +175,6 @@ export default function SessionPage({
     };
   };
 
-  const attachStreamingSnapshotNodes = async (roots: ConversationNodeDto[]) => {
-    const activeNodes = collectStreamingNodes(roots);
-    await Promise.all(
-      activeNodes.map((node) =>
-        attachNode(node.id, {
-          question: node.question ?? undefined,
-          parentNodeId: node.parentId ?? undefined,
-          paragraphId: node.paragraphId ?? undefined,
-        }),
-      ),
-    );
-  };
-
-  /* Reset scroll flag when navigating to a different session */
   useEffect(() => {
     hasScrolledToBottom.current = false;
     loadAll().catch((e: Error) => setError(e.message));
@@ -150,12 +182,16 @@ export default function SessionPage({
 
   useEffect(() => {
     if (!snapshot) return;
+    void Promise.all(
+      collectStreamingNodes(snapshot.rootNodes).map((node) =>
+        attachNode(node.id, {
+          question: node.question ?? undefined,
+          parentNodeId: node.parentId ?? undefined,
+          paragraphId: node.paragraphId ?? undefined,
+        }),
+      ),
+    ).catch((e: Error) => setError(e.message));
 
-    attachStreamingSnapshotNodes(snapshot.rootNodes).catch((e: Error) =>
-      setError(e.message),
-    );
-
-    /* Scroll to bottom on first snapshot load so user sees latest messages */
     if (!hasScrolledToBottom.current && snapshot.rootNodes.length > 0) {
       hasScrolledToBottom.current = true;
       requestAnimationFrame(() => {
@@ -164,23 +200,32 @@ export default function SessionPage({
     }
   }, [snapshot]);
 
-  /**
-   * Polling fallback: while any node is still streaming, re-fetch the
-   * snapshot every 2s. This catches chunks missed due to the subscription
-   * race condition (late subscribe, network delay, etc.).
-   */
   useEffect(() => {
-    const hasActiveStreams = Object.values(streamingNodes).some((n) => !n.done);
-    if (!hasActiveStreams || !sessionId) return;
+    if (!sessionId) return;
 
-    const interval = setInterval(() => {
-      void loadAll().catch(() => {});
-    }, 2000);
+    const runRefresh = () => {
+      void refreshSnapshot().catch((e: Error) => setError(e.message));
+    };
 
-    return () => clearInterval(interval);
-  }, [streamingNodes, sessionId, token]);
+    const interval = window.setInterval(
+      runRefresh,
+      document.visibilityState === "visible" ? 1200 : 2500,
+    );
 
-  /* session events */
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        runRefresh();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [sessionId, token]);
+
   useEffect(() => {
     if (!sessionId) return;
     let active = true;
@@ -197,7 +242,25 @@ export default function SessionPage({
             parentNodeId: data.type === "child_node_created" ? data.parentNodeId : undefined,
             paragraphId: data.type === "child_node_created" ? data.paragraphId : undefined,
           });
-          void loadAll().catch((e: Error) => setError(e.message));
+          setSnapshot((prev) => {
+            if (!prev) return prev;
+            if (data.type === "root_node_created") {
+              return insertRootNode(prev, createStreamingNode(data.nodeId, data.question, data.askedBy, data.depth));
+            }
+            return insertChildNode(
+              prev,
+              data.parentNodeId,
+              data.paragraphId,
+              createStreamingNode(
+                data.nodeId,
+                data.question,
+                data.askedBy,
+                data.depth,
+                data.parentNodeId,
+                data.paragraphId,
+              ),
+            );
+          });
         },
       )
       .then((unsub) => {
@@ -213,20 +276,24 @@ export default function SessionPage({
     };
   }, [sessionId, token]);
 
-  /* environment events */
   useEffect(() => {
     if (!environmentId) return;
     let active = true;
     envUnsub.current?.();
 
     realtimeManager
-      .subscribe<EnvironmentEventMemberUpdated>(
-        token,
-        `env:${environmentId}`,
-        () => {
-          if (active) void loadAll().catch((e: Error) => setError(e.message));
-        },
-      )
+      .subscribe<EnvironmentEventMemberUpdated>(token, `env:${environmentId}`, () => {
+        if (!active) return;
+        void Promise.all([
+          api.listEnvironments(token),
+          api.getMembers(token, environmentId),
+        ])
+          .then(([envs, mems]) => {
+            setEnvironment(envs.find((env) => env.id === environmentId) ?? null);
+            setMembers(mems);
+          })
+          .catch((e: Error) => setError(e.message));
+      })
       .then((unsub) => {
         if (active) envUnsub.current = unsub;
         else unsub();
@@ -240,7 +307,6 @@ export default function SessionPage({
     };
   }, [environmentId, token]);
 
-  /* cleanup */
   useEffect(() => {
     return () => {
       sessionUnsub.current?.();
@@ -261,16 +327,19 @@ export default function SessionPage({
     }
   };
 
-  /* ── open thread panel ─────────────────────────────────── */
-  const openThread = (nodeId: string, paragraph: ParagraphDto, parentNode: ConversationNodeDto) => {
-    setThreadParagraph({ nodeId, paragraph, parentNode });
-    setThreadOpen(true);
+  const pushView = (view: ViewState) => {
+    setViewStack((prev) => [...prev, view]);
+    requestAnimationFrame(() => {
+      chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    });
   };
 
-  /* ── render ────────────────────────────────────────────── */
+  const popToView = (index: number) => {
+    setViewStack((prev) => prev.slice(0, index + 1));
+  };
+
   return (
     <div className="session-page">
-      {/* Header */}
       <div className="session-header">
         <div>
           <h1>{selectedSession?.title ?? "Session"}</h1>
@@ -285,155 +354,454 @@ export default function SessionPage({
             className="btn btn-secondary btn-sm"
             onClick={() => navigate(`/app/environments/${environmentId}`)}
           >
-            ← Back to environment
+            Back to environment
           </button>
         </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
 
-      {/* Chat messages */}
-      <div className="chat-container">
-        {snapshot?.rootNodes.length === 0 &&
-          Object.keys(streamingNodes).length === 0 && (
-            <div className="empty-state">
-              <h4>Start the conversation</h4>
-              <p>Ask the shared AI something the room should explore together.</p>
-            </div>
-          )}
+      {viewStack.length > 1 && (
+        <div className="breadcrumb-nav">
+          {viewStack.map((view, index) => {
+            const isLast = index === viewStack.length - 1;
+            let label = "";
+            if (view.type === "root") label = "Root Chat";
+            else if (view.type === "paragraph") label = "Paragraph View";
+            else label = `Sub-topic: ${view.question.substring(0, 20)}${view.question.length > 20 ? "..." : ""}`;
 
-        {snapshot?.rootNodes.map((node) => (
-          <ChatNode
-            key={node.id}
-            node={node}
-            depth={0}
-            streamingNodes={streamingNodes}
-            onOpenThread={openThread}
-          />
-        ))}
-
-        {/* Render streaming nodes that are NOT yet in the snapshot */}
-        {Object.values(streamingNodes)
-          .filter((sn) => {
-            if (sn.done) return false;
-            /* skip if this node already exists in the snapshot tree */
-            const existsInSnapshot = snapshot?.rootNodes.some(
-              (root) => findNodeInTree(root, sn.nodeId),
+            return (
+              <span key={index} className="breadcrumb-item">
+                <button
+                  className={`breadcrumb-link ${isLast ? "active" : ""}`}
+                  disabled={isLast}
+                  onClick={() => !isLast && popToView(index)}
+                >
+                  {label}
+                </button>
+                {!isLast && <span className="breadcrumb-separator">/</span>}
+              </span>
             );
-            return !existsInSnapshot;
-          })
-          .map((sn) => (
-            <StreamingChatMessage key={sn.nodeId} node={sn} />
-          ))}
+          })}
+        </div>
+      )}
 
-        {/* Scroll anchor — always at the bottom of chat */}
+      <div className="chat-container">
+        {currentView.type === "root" && (
+          <>
+            {snapshot?.rootNodes.length === 0 && Object.keys(streamingNodes).length === 0 && (
+              <div className="empty-state">
+                <h4>Start the conversation</h4>
+                <p>Ask the shared AI something the room should explore together.</p>
+              </div>
+            )}
+            {snapshot?.rootNodes.map((node) => (
+              <ChatNode
+                key={node.id}
+                node={node}
+                depth={0}
+                streamingNodes={streamingNodes}
+                onPushView={pushView}
+              />
+            ))}
+            {Object.values(streamingNodes)
+              .filter((node) => !node.done && !node.parentNodeId && !snapshot?.rootNodes.some((root) => findNodeInTree(root, node.nodeId)))
+              .map((node) => <StreamingChatMessage key={node.nodeId} node={node} />)}
+          </>
+        )}
+
+        {currentView.type === "paragraph" && (
+          <div className="paragraph-view">
+            {(() => {
+              const context = snapshot
+                ? findParagraphContext(snapshot.rootNodes, currentView.nodeId, currentView.paragraphId)
+                : null;
+              if (!context) {
+                return (
+                  <div className="empty-state">
+                    <p>Waiting for this part of the response to arrive...</p>
+                  </div>
+                );
+              }
+              const childNodes = context.parentNode.children.filter((child) => child.paragraphId === currentView.paragraphId);
+              return (
+                <>
+                  <div className="paragraph-context">
+                    {renderBlock(parseSingleBlock(context.paragraph.content))}
+                  </div>
+                  <h4 className="paragraph-questions-title">Discussions on this paragraph</h4>
+                  {childNodes.length === 0 ? (
+                    <div className="empty-state">
+                      <p>No discussions yet. Be the first to ask about this paragraph.</p>
+                    </div>
+                  ) : (
+                    <div className="paragraph-questions-list">
+                      {childNodes.map((child) => (
+                        <div
+                          key={child.id}
+                          className={`child-question-item ${child.status === "STREAMING" ? "streaming" : ""}`}
+                          onClick={() => pushView({ type: "node", nodeId: child.id, question: child.question })}
+                        >
+                          <div className="asker">@{child.askedByUsername ?? "unknown"}</div>
+                          <div className="question-text">{child.question}</div>
+                          <div className="view-thread-hint">
+                            {child.status === "STREAMING" ? "Streaming..." : "View Thread ->"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        )}
+
+        {currentView.type === "node" && (
+          <div className="node-view">
+            {(() => {
+              const nodeInSnapshot = snapshot?.rootNodes
+                .map((root) => findNode(root, currentView.nodeId))
+                .find(Boolean) as ConversationNodeDto | undefined;
+              const liveNode = streamingNodes[currentView.nodeId];
+              if (nodeInSnapshot) {
+                return (
+                  <ChatNode
+                    node={nodeInSnapshot}
+                    depth={nodeInSnapshot.depth}
+                    streamingNodes={streamingNodes}
+                    onPushView={pushView}
+                  />
+                );
+              }
+              if (liveNode) return <StreamingChatMessage node={liveNode} />;
+              return (
+                <div className="empty-state">
+                  <p>Loading response...</p>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
         <div ref={chatBottomRef} />
       </div>
 
-      {/* Composer */}
-      <div className="chat-composer">
-        <form
-          className="composer-box"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!rootQuestion.trim() || !sessionId) return;
-            void withBusy("ask-root", async () => {
-              const q = rootQuestion;
-              setRootQuestion("");
-              const res = await api.askRoot(token, sessionId, q);
-              await attachNode(res.nodeId, { question: q });
-            });
-          }}
-        >
-          <textarea
-            value={rootQuestion}
-            onChange={(e) => setRootQuestion(e.target.value)}
-            placeholder={
-              canAskRoot
-                ? "Ask the shared AI something..."
-                : "Only hosts can ask root questions"
-            }
-            disabled={!canAskRoot}
-            rows={1}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                e.currentTarget.form?.requestSubmit();
+      {(currentView.type === "root" || currentView.type === "paragraph") && (
+        <div className="chat-composer">
+          <form
+            className="composer-box"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (currentView.type === "root") {
+                if (!rootQuestion.trim() || !sessionId || !canAskRoot) return;
+                void withBusy("ask-root", async () => {
+                  const question = rootQuestion;
+                  setRootQuestion("");
+                  const res = await api.askRoot(token, sessionId, question);
+                  setSnapshot((prev) =>
+                    prev
+                      ? insertRootNode(prev, createStreamingNode(res.nodeId, question, me.username, 0))
+                      : prev,
+                  );
+                  await attachNode(res.nodeId, { question });
+                  window.setTimeout(() => {
+                    void refreshSnapshot().catch((e: Error) => setError(e.message));
+                  }, 500);
+                });
+                return;
               }
-            }}
-          />
-          <button
-            className="btn btn-primary"
-            disabled={busyKey === "ask-root" || !canAskRoot}
-            type="submit"
-          >
-            ↑
-          </button>
-        </form>
-        {!canAskRoot && (
-          <p className="composer-hint">
-            Only hosts and co-hosts can ask root questions.
-          </p>
-        )}
-      </div>
 
-      {/* Thread panel */}
-      <ThreadPanel
-        open={threadOpen}
-        paragraph={threadParagraph}
-        token={token}
-        canAsk={canAskParagraph}
-        busyKey={busyKey}
-        onClose={() => {
-          setThreadOpen(false);
-          setThreadParagraph(null);
-        }}
-        onAsk={(nodeId, paragraphId, question) =>
-          withBusy(`para-${paragraphId}`, async () => {
-            const res = await api.askOnParagraph(token, nodeId, paragraphId, question);
-            await attachNode(res.nodeId, {
-              parentNodeId: nodeId,
-              paragraphId,
-              question,
-            });
-          })
-        }
-      />
+              if (!rootQuestion.trim() || !canAskParagraph) return;
+              void withBusy(`ask-${currentView.paragraphId}`, async () => {
+                const question = rootQuestion;
+                setRootQuestion("");
+                const res = await api.askOnParagraph(
+                  token,
+                  currentView.nodeId,
+                  currentView.paragraphId,
+                  question,
+                );
+                setSnapshot((prev) =>
+                  prev
+                    ? insertChildNode(
+                        prev,
+                        currentView.nodeId,
+                        currentView.paragraphId,
+                        createStreamingNode(
+                          res.nodeId,
+                          question,
+                          me.username,
+                          getNodeDepth(prev.rootNodes, currentView.nodeId) + 1,
+                          currentView.nodeId,
+                          currentView.paragraphId,
+                        ),
+                      )
+                    : prev,
+                );
+                await attachNode(res.nodeId, {
+                  parentNodeId: currentView.nodeId,
+                  paragraphId: currentView.paragraphId,
+                  question,
+                });
+                window.setTimeout(() => {
+                  void refreshSnapshot().catch((e: Error) => setError(e.message));
+                }, 500);
+                pushView({ type: "node", nodeId: res.nodeId, question });
+              });
+            }}
+          >
+            <textarea
+              value={rootQuestion}
+              onChange={(e) => setRootQuestion(e.target.value)}
+              placeholder={
+                currentView.type === "root"
+                  ? canAskRoot
+                    ? "Ask the shared AI something..."
+                    : "Only hosts can ask root questions"
+                  : canAskParagraph
+                    ? "Ask about this paragraph..."
+                    : "Cannot ask here"
+              }
+              disabled={
+                currentView.type === "root"
+                  ? !canAskRoot || busyKey === "ask-root"
+                  : !canAskParagraph || busyKey === `ask-${currentView.paragraphId}`
+              }
+              rows={1}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  e.currentTarget.form?.requestSubmit();
+                }
+              }}
+            />
+            <button
+              className="btn btn-primary"
+              disabled={
+                currentView.type === "root"
+                  ? !canAskRoot || busyKey === "ask-root"
+                  : !canAskParagraph || busyKey === `ask-${currentView.paragraphId}`
+              }
+              type="submit"
+            >
+              ^
+            </button>
+          </form>
+          {currentView.type === "root" && !canAskRoot && (
+            <p className="composer-hint">
+              Only hosts and co-hosts can ask root questions.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-/* ── helper: find a node anywhere in the tree ──────────────── */
+function findNode(root: ConversationNodeDto, nodeId: string): ConversationNodeDto | null {
+  if (root.id === nodeId) return root;
+  for (const child of root.children) {
+    const found = findNode(child, nodeId);
+    if (found) return found;
+  }
+  return null;
+}
+
 function findNodeInTree(root: ConversationNodeDto, nodeId: string): boolean {
-  if (root.id === nodeId) return true;
-  return root.children.some((child) => findNodeInTree(child, nodeId));
+  return findNode(root, nodeId) !== null;
+}
+
+function findParagraphContext(
+  roots: ConversationNodeDto[],
+  nodeId: string,
+  paragraphId: string,
+): { parentNode: ConversationNodeDto; paragraph: ParagraphDto } | null {
+  const parentNode = roots.map((root) => findNode(root, nodeId)).find(Boolean) ?? null;
+  if (!parentNode) return null;
+  const paragraph = parentNode.paragraphs.find((item) => item.id === paragraphId) ?? null;
+  if (!paragraph) return null;
+  return { parentNode, paragraph };
 }
 
 function collectStreamingNodes(nodes: ConversationNodeDto[]): ConversationNodeDto[] {
   const result: ConversationNodeDto[] = [];
-
   for (const node of nodes) {
-    if (node.status === "STREAMING") {
-      result.push(node);
-    }
+    if (node.status === "STREAMING") result.push(node);
     result.push(...collectStreamingNodes(node.children));
   }
-
   return result;
 }
 
-/* ── Streaming chat message (for nodes not yet in snapshot) ── */
+function flattenNodes(nodes: ConversationNodeDto[]): ConversationNodeDto[] {
+  const result: ConversationNodeDto[] = [];
+  for (const node of nodes) {
+    result.push(node);
+    result.push(...flattenNodes(node.children));
+  }
+  return result;
+}
+
+function hasStreamingNode(nodes: ConversationNodeDto[]): boolean {
+  return flattenNodes(nodes).some((node) => node.status === "STREAMING");
+}
+
+function createStreamingNode(
+  nodeId: string,
+  question: string,
+  askedByUsername: string,
+  depth: number,
+  parentNodeId?: string,
+  paragraphId?: string,
+): ConversationNodeDto {
+  return {
+    id: nodeId,
+    parentId: parentNodeId ?? null,
+    paragraphId: paragraphId ?? null,
+    depth,
+    question,
+    askedByUsername,
+    fullContent: "",
+    status: "STREAMING",
+    createdAt: new Date().toISOString(),
+    paragraphs: [],
+    children: [],
+  };
+}
+
+function insertRootNode(snapshot: SessionSnapshotDto, node: ConversationNodeDto): SessionSnapshotDto {
+  if (snapshot.rootNodes.some((root) => root.id === node.id)) return snapshot;
+  return { ...snapshot, rootNodes: [...snapshot.rootNodes, node] };
+}
+
+function insertChildNode(
+  snapshot: SessionSnapshotDto,
+  parentNodeId: string,
+  paragraphId: string,
+  childNode: ConversationNodeDto,
+): SessionSnapshotDto {
+  let inserted = false;
+  const rootNodes = snapshot.rootNodes.map((root) =>
+    updateNode(root, parentNodeId, (node) => {
+      if (node.children.some((child) => child.id === childNode.id)) return node;
+      inserted = true;
+      return {
+        ...node,
+        paragraphs: node.paragraphs.map((paragraph) =>
+          paragraph.id === paragraphId
+            ? { ...paragraph, childNodeCount: paragraph.childNodeCount + 1 }
+            : paragraph,
+        ),
+        children: [...node.children, childNode],
+      };
+    }),
+  );
+  return inserted ? { ...snapshot, rootNodes } : snapshot;
+}
+
+function appendNodeContent(snapshot: SessionSnapshotDto, nodeId: string, chunk: string): SessionSnapshotDto {
+  return {
+    ...snapshot,
+    rootNodes: snapshot.rootNodes.map((root) =>
+      updateNode(root, nodeId, (node) => ({ ...node, fullContent: node.fullContent + chunk })),
+    ),
+  };
+}
+
+function upsertParagraph(snapshot: SessionSnapshotDto, nodeId: string, paragraph: ParagraphDto): SessionSnapshotDto {
+  return {
+    ...snapshot,
+    rootNodes: snapshot.rootNodes.map((root) =>
+      updateNode(root, nodeId, (node) => ({
+        ...node,
+        paragraphs: [
+          ...node.paragraphs.filter((item) => item.id !== paragraph.id),
+          paragraph,
+        ].sort((a, b) => a.index - b.index),
+      })),
+    ),
+  };
+}
+
+function updateNodeStatus(snapshot: SessionSnapshotDto, nodeId: string, status: string): SessionSnapshotDto {
+  return {
+    ...snapshot,
+    rootNodes: snapshot.rootNodes.map((root) =>
+      updateNode(root, nodeId, (node) => ({ ...node, status })),
+    ),
+  };
+}
+
+function updateNode(
+  node: ConversationNodeDto,
+  nodeId: string,
+  updater: (node: ConversationNodeDto) => ConversationNodeDto,
+): ConversationNodeDto {
+  if (node.id === nodeId) return updater(node);
+
+  let changed = false;
+  const children = node.children.map((child) => {
+    const updated = updateNode(child, nodeId, updater);
+    if (updated !== child) changed = true;
+    return updated;
+  });
+  return changed ? { ...node, children } : node;
+}
+
+function getParagraphChildCount(snapshot: SessionSnapshotDto, nodeId: string, paragraphId: string): number {
+  return findParagraphContext(snapshot.rootNodes, nodeId, paragraphId)?.paragraph.childNodeCount ?? 0;
+}
+
+function getNodeDepth(roots: ConversationNodeDto[], nodeId: string): number {
+  return (roots.map((root) => findNode(root, nodeId)).find(Boolean) ?? null)?.depth ?? 0;
+}
+
+function reconcileStreamingNodes(
+  current: Record<string, StreamingNodeState>,
+  snapshot: SessionSnapshotDto,
+): Record<string, StreamingNodeState> {
+  const next = { ...current };
+  const snapshotNodes = flattenNodes(snapshot.rootNodes);
+
+  for (const node of snapshotNodes) {
+    const live = next[node.id];
+    if (!live && node.status !== "STREAMING") continue;
+
+    next[node.id] = {
+      nodeId: node.id,
+      question: live?.question ?? node.question ?? undefined,
+      parentNodeId: live?.parentNodeId ?? node.parentId ?? undefined,
+      paragraphId: live?.paragraphId ?? node.paragraphId ?? undefined,
+      content: node.fullContent || live?.content || "",
+      paragraphs:
+        node.paragraphs.length > 0
+          ? node.paragraphs.map((paragraph) => ({
+              id: paragraph.id,
+              index: paragraph.index,
+              content: paragraph.content,
+            }))
+          : live?.paragraphs ?? [],
+      done: node.status === "COMPLETE" || live?.done === true,
+    };
+
+    if (node.status === "COMPLETE" && (node.fullContent || node.paragraphs.length > 0)) {
+      delete next[node.id];
+    }
+  }
+
+  return next;
+}
+
 function StreamingChatMessage({ node }: { node: StreamingNodeState }) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const blocks = parseRenderableBlocks(node.content);
 
-  /* auto-scroll as content streams in */
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [node.content]);
 
   return (
     <>
-      {/* User question */}
       {node.question && (
         <div className="chat-message user-turn">
           <div className="chat-message-header">
@@ -443,29 +811,24 @@ function StreamingChatMessage({ node }: { node: StreamingNodeState }) {
           <div className="chat-question">{node.question}</div>
         </div>
       )}
-
-      {/* AI response streaming live */}
       <div className="chat-message assistant-turn is-streaming">
         <div className="chat-message-header">
           <div className="chat-avatar ai">AI</div>
           <span className="chat-sender">SangamAI</span>
-          <span className="streaming-badge">● Streaming</span>
+          <span className="streaming-badge">Streaming</span>
         </div>
         <div className="ai-response">
-          {node.content
-            ? node.content
-                .split("\n\n")
-                .filter(Boolean)
-                .map((text, i) => (
-                  <div key={i} className="ai-paragraph">
-                    <p>{text}</p>
-                  </div>
-                ))
-            : (
-              <div className="ai-paragraph">
-                <p className="streaming-placeholder">Thinking...</p>
+          {blocks.length > 0 ? (
+            blocks.map((block, index) => (
+              <div key={`${block.type}-${index}`} className={`ai-paragraph ${block.type === "code" ? "ai-paragraph-code" : ""}`}>
+                {renderBlock(block, { showCursor: index === blocks.length - 1 })}
               </div>
-            )}
+            ))
+          ) : (
+            <div className="ai-paragraph">
+              <p className="streaming-placeholder">Thinking...</p>
+            </div>
+          )}
         </div>
         <div ref={bottomRef} />
       </div>
@@ -473,30 +836,24 @@ function StreamingChatMessage({ node }: { node: StreamingNodeState }) {
   );
 }
 
-/* ── Chat node (recursive, for snapshot nodes) ─────────────── */
 function ChatNode({
   node,
   depth,
   streamingNodes,
-  onOpenThread,
+  onPushView,
 }: {
   node: ConversationNodeDto;
   depth: number;
   streamingNodes: Record<string, StreamingNodeState>;
-  onOpenThread: (nodeId: string, paragraph: ParagraphDto, parentNode: ConversationNodeDto) => void;
+  onPushView: (view: ViewState) => void;
 }) {
   const liveNode = streamingNodes[node.id];
-  const isStillStreaming =
-    (liveNode && !liveNode.done) || node.status === "STREAMING";
-
-  /* Prefer live streaming content over snapshot (snapshot fullContent is
-     empty while status=STREAMING). Fall back to snapshot when complete. */
+  const isStillStreaming = (liveNode && !liveNode.done) || node.status === "STREAMING";
   const content = liveNode?.content || node.fullContent || "";
   const hasFinalParagraphs = node.paragraphs.length > 0 && !isStillStreaming;
-
+  const streamingBlocks = parseRenderableBlocks(content);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  /* auto-scroll while streaming */
   useEffect(() => {
     if (isStillStreaming) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -505,7 +862,6 @@ function ChatNode({
 
   return (
     <>
-      {/* User question */}
       {node.question && (
         <div className="chat-message user-turn">
           <div className="chat-message-header">
@@ -519,226 +875,165 @@ function ChatNode({
           <div className="chat-question">{node.question}</div>
         </div>
       )}
-
-      {/* AI response */}
       {(content || isStillStreaming) && (
-        <div
-          className={`chat-message assistant-turn ${isStillStreaming ? "is-streaming" : ""}`}
-        >
+        <div className={`chat-message assistant-turn ${isStillStreaming ? "is-streaming" : ""}`}>
           <div className="chat-message-header">
             <div className="chat-avatar ai">AI</div>
             <span className="chat-sender">SangamAI</span>
-            {isStillStreaming && (
-              <span className="streaming-badge">● Streaming</span>
-            )}
+            {isStillStreaming && <span className="streaming-badge">Streaming</span>}
           </div>
           <div className="ai-response">
             {hasFinalParagraphs
-              ? /* Final paragraphs from snapshot — clickable */
-                node.paragraphs.map((p) => (
+              ? node.paragraphs.map((paragraph) => (
                   <div
-                    key={p.id}
-                    className="ai-paragraph"
+                    key={paragraph.id}
+                    className={`ai-paragraph ${isCodeFenceBlock(paragraph.content) ? "ai-paragraph-code" : ""}`}
                     onClick={() => {
-                      if (node.depth < MAX_THREAD_DEPTH) {
-                        onOpenThread(node.id, p, node);
+                      if (depth < MAX_THREAD_DEPTH) {
+                        onPushView({ type: "paragraph", nodeId: node.id, paragraphId: paragraph.id });
                       }
                     }}
                   >
-                    <p>{p.content}</p>
-                    {node.depth < MAX_THREAD_DEPTH && (
+                    {renderBlock(parseSingleBlock(paragraph.content))}
+                    {depth < MAX_THREAD_DEPTH && (
                       <div className="thread-indicator">
-                        💬 {p.childNodeCount > 0 ? `${p.childNodeCount} threads` : "Discuss this"}
+                        {paragraph.childNodeCount > 0 ? `${paragraph.childNodeCount} threads` : "Discuss this"}
                       </div>
                     )}
                   </div>
                 ))
-              : /* Still streaming or raw content — show as flowing text */
-                (content || "Thinking...").split("\n\n").filter(Boolean).map((text, i) => (
-                  <div key={i} className="ai-paragraph">
-                    <p>{text}{isStillStreaming && i === (content || "").split("\n\n").filter(Boolean).length - 1 ? "▊" : ""}</p>
+              : (streamingBlocks.length > 0 ? streamingBlocks : [{ type: "text", content: "Thinking..." } as RenderableBlock]).map((block, index, arr) => (
+                  <div key={`${block.type}-${index}`} className={`ai-paragraph ${block.type === "code" ? "ai-paragraph-code" : ""}`}>
+                    {renderBlock(block, { showCursor: isStillStreaming && index === arr.length - 1 })}
                   </div>
                 ))}
           </div>
           <div ref={bottomRef} />
         </div>
       )}
-
-      {/* Render children recursively */}
-      {node.children.map((child) => (
-        <ChatNode
-          key={child.id}
-          node={child}
-          depth={depth + 1}
-          streamingNodes={streamingNodes}
-          onOpenThread={onOpenThread}
-        />
-      ))}
     </>
   );
 }
 
-/* ── Thread panel (slide-in) ───────────────────────────────── */
-function ThreadPanel({
-  open,
-  paragraph,
-  token,
-  canAsk,
-  busyKey,
-  onClose,
-  onAsk,
-}: {
-  open: boolean;
-  paragraph: {
-    nodeId: string;
-    paragraph: ParagraphDto;
-    parentNode: ConversationNodeDto;
-  } | null;
-  token: string;
-  canAsk: boolean;
-  busyKey: string | null;
-  onClose: () => void;
-  onAsk: (nodeId: string, paragraphId: string, question: string) => Promise<void>;
-}) {
-  const [question, setQuestion] = useState("");
+function renderBlock(block: RenderableBlock, options: { showCursor?: boolean } = {}) {
+  const markdown =
+    block.type === "code"
+      ? `\`\`\`${block.language ?? ""}\n${block.content}${options.showCursor ? "\n|" : ""}\n\`\`\``
+      : `${block.content}${options.showCursor ? "\n\n|" : ""}`;
+  return <MarkdownBlock content={markdown} />;
+}
 
-  /* find child nodes for this paragraph from the parent */
-  const childNodes =
-    paragraph?.parentNode.children.filter(
-      (c) => c.paragraphId === paragraph.paragraph.id,
-    ) ?? [];
-
+function MarkdownBlock({ content }: { content: string }) {
   return (
-    <>
-      {/* backdrop */}
-      {open && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.15)",
-            zIndex: 199,
-          }}
-          onClick={onClose}
-        />
-      )}
-
-      <div className={`thread-panel ${open ? "open" : ""}`}>
-        <div className="thread-panel-header">
-          <h3>Paragraph Thread</h3>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>
-            ✕
-          </button>
-        </div>
-
-        <div className="thread-panel-content">
-          {/* The paragraph text */}
-          {paragraph && (
-            <div
-              style={{
-                padding: "1rem",
-                background: "var(--bg-secondary)",
-                borderRadius: "var(--radius-md)",
-                marginBottom: "1.5rem",
-                fontSize: "0.95rem",
-                lineHeight: 1.7,
-                borderLeft: "3px solid var(--accent)",
-              }}
-            >
-              {paragraph.paragraph.content}
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      components={{
+        h1: ({ children }) => <h1 className="ai-heading ai-heading-1">{children}</h1>,
+        h2: ({ children }) => <h2 className="ai-heading ai-heading-2">{children}</h2>,
+        h3: ({ children }) => <h3 className="ai-heading ai-heading-3">{children}</h3>,
+        h4: ({ children }) => <h4 className="ai-heading ai-heading-4">{children}</h4>,
+        h5: ({ children }) => <h5 className="ai-heading ai-heading-5">{children}</h5>,
+        h6: ({ children }) => <h6 className="ai-heading ai-heading-6">{children}</h6>,
+        p: ({ children }) => <p className="ai-text-block">{children}</p>,
+        ul: ({ children }) => <ul className="ai-list ai-list-unordered">{children}</ul>,
+        ol: ({ children }) => <ol className="ai-list ai-list-ordered">{children}</ol>,
+        blockquote: ({ children }) => <blockquote className="ai-blockquote">{children}</blockquote>,
+        a: ({ children, href }) => <a className="ai-link" href={href} rel="noreferrer" target="_blank">{children}</a>,
+        code: ({ children, className }) => {
+          const value = String(children).replace(/\n$/, "");
+          const language = normalizeLanguage(className?.replace("language-", "") ?? "text");
+          const isBlock = className != null || value.includes("\n");
+          if (!isBlock) return <code className="ai-inline-code">{children}</code>;
+          const highlighted = highlightCode(value, language);
+          return (
+            <div className="ai-code-block">
+              <div className="ai-code-header">
+                <span>{language}</span>
+              </div>
+              <pre>
+                <code className={`language-${language}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
+              </pre>
             </div>
-          )}
-
-          {/* Child questions (show only the question, not AI response) */}
-          {childNodes.length === 0 ? (
-            <div className="empty-state">
-              <p>No discussions yet. Be the first to ask about this paragraph.</p>
-            </div>
-          ) : (
-            childNodes.map((child) => (
-              <ChildThreadQuestion key={child.id} node={child} />
-            ))
-          )}
-        </div>
-
-        {/* Composer */}
-        {canAsk && paragraph && (
-          <div className="thread-panel-composer">
-            <form
-              className="composer-box"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (!question.trim()) return;
-                void onAsk(
-                  paragraph.nodeId,
-                  paragraph.paragraph.id,
-                  question,
-                ).then(() => setQuestion(""));
-              }}
-            >
-              <textarea
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                placeholder="Ask about this paragraph..."
-                rows={1}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    e.currentTarget.form?.requestSubmit();
-                  }
-                }}
-              />
-              <button
-                className="btn btn-primary"
-                disabled={
-                  busyKey === `para-${paragraph.paragraph.id}`
-                }
-                type="submit"
-              >
-                ↑
-              </button>
-            </form>
-          </div>
-        )}
-      </div>
-    </>
+          );
+        },
+        pre: ({ children }) => <>{children}</>,
+      }}
+    >
+      {content}
+    </ReactMarkdown>
   );
 }
 
-/* ── Child thread question (expandable to show AI response) ── */
-function ChildThreadQuestion({ node }: { node: ConversationNodeDto }) {
-  const [expanded, setExpanded] = useState(false);
+function highlightCode(code: string, language: string): string {
+  const grammar = Prism.languages[language] ?? Prism.languages.plain ?? Prism.languages.text;
+  return Prism.highlight(code, grammar, language);
+}
 
-  return (
-    <div style={{ marginBottom: "0.5rem" }}>
-      <div className="thread-question" onClick={() => setExpanded(!expanded)}>
-        <div className="asker">
-          @{node.askedByUsername ?? "unknown"}
-        </div>
-        <div className="question-text">{node.question}</div>
-      </div>
+function normalizeLanguage(language: string): string {
+  const normalized = language.toLowerCase();
+  switch (normalized) {
+    case "js":
+      return "javascript";
+    case "ts":
+      return "typescript";
+    case "py":
+      return "python";
+    case "sh":
+    case "shell":
+    case "zsh":
+    case "powershell":
+    case "ps1":
+      return "bash";
+    case "cs":
+      return "csharp";
+    default:
+      return normalized;
+  }
+}
 
-      {expanded && node.fullContent && (
-        <div
-          style={{
-            padding: "0.75rem 1rem",
-            fontSize: "0.9rem",
-            lineHeight: 1.7,
-            color: "var(--text-secondary)",
-            borderLeft: "2px solid var(--border)",
-            marginLeft: "0.5rem",
-            marginBottom: "0.5rem",
-          }}
-        >
-          {node.paragraphs.length > 0
-            ? node.paragraphs.map((p) => (
-                <p key={p.id} style={{ marginBottom: "0.75rem" }}>
-                  {p.content}
-                </p>
-              ))
-            : node.fullContent}
-        </div>
-      )}
-    </div>
-  );
+function parseRenderableBlocks(content: string): RenderableBlock[] {
+  const normalized = content.replace(/\r\n/g, "\n");
+  const blocks: RenderableBlock[] = [];
+  const codeFenceRegex = /```([\w+-]+)?\n([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = codeFenceRegex.exec(normalized)) !== null) {
+    const preceding = normalized.slice(lastIndex, match.index);
+    blocks.push(...parseTextBlocks(preceding));
+    blocks.push({
+      type: "code",
+      language: match[1] ?? null,
+      content: match[2].replace(/\n$/, ""),
+    });
+    lastIndex = match.index + match[0].length;
+  }
+
+  blocks.push(...parseTextBlocks(normalized.slice(lastIndex)));
+  return blocks;
+}
+
+function parseTextBlocks(content: string): RenderableBlock[] {
+  return content
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => ({ type: "text", content: block }));
+}
+
+function parseSingleBlock(content: string): RenderableBlock {
+  const normalized = content.trim().replace(/\r\n/g, "\n");
+  const codeMatch = normalized.match(/^```([\w+-]+)?\n([\s\S]*?)```$/);
+  if (codeMatch) {
+    return {
+      type: "code",
+      language: codeMatch[1] ?? null,
+      content: codeMatch[2].replace(/\n$/, ""),
+    };
+  }
+  return { type: "text", content: normalized };
+}
+
+function isCodeFenceBlock(content: string): boolean {
+  return /^```[\w+-]*\n[\s\S]*```$/.test(content.trim());
 }

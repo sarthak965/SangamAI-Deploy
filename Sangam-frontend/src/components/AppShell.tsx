@@ -1,113 +1,189 @@
-import { useState, type ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { useEffect, useState, type ReactNode } from "react";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import type { CurrentUser } from "../types";
 import { useTheme } from "../lib/theme";
+import type { SoloRecentChat } from "../pages/HomePage";
 
 export default function AppShell({
   me,
   onLogout,
+  recentChats,
   children,
 }: {
   me: CurrentUser;
   onLogout: () => void;
+  recentChats: SoloRecentChat[];
   children: ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const { theme, toggle: toggleTheme } = useTheme();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const isMobile = typeof window !== "undefined" && window.innerWidth <= 1024;
+  const showSidebar = mobileOpen || !collapsed;
 
   const toggleSidebar = () => {
-    if (window.innerWidth <= 1024) {
+    if (isMobile) {
       setMobileOpen((prev) => !prev);
-    } else {
-      setCollapsed((prev) => !prev);
+      return;
     }
+    setCollapsed((prev) => !prev);
   };
 
   const closeMobile = () => setMobileOpen(false);
 
+  useEffect(() => {
+    closeMobile();
+  }, [location.pathname]);
+
   return (
-    <div className="app-layout">
-      {/* mobile overlay */}
+    <div className="workspace-layout">
       <div
-        className={`sidebar-overlay ${mobileOpen ? "visible" : ""}`}
+        className={`workspace-overlay ${mobileOpen ? "visible" : ""}`}
         onClick={closeMobile}
       />
 
-      {/* toggle button */}
       <button
-        className={`sidebar-toggle ${collapsed || window.innerWidth <= 1024 ? "visible" : ""}`}
+        className={`workspace-sidebar-floating-toggle ${!showSidebar ? "visible" : ""}`}
         onClick={toggleSidebar}
-        aria-label="Toggle sidebar"
+        aria-label="Open sidebar"
+        type="button"
       >
-        ☰
+        <SparkIcon />
       </button>
 
-      {/* sidebar */}
-      <aside
-        className={`sidebar ${collapsed && !mobileOpen ? "collapsed" : ""} ${mobileOpen ? "open" : ""}`}
-      >
-        <div className="sidebar-brand">
-          <div className="logo-icon">S</div>
-          <span>SangamAI</span>
+      <aside className={`workspace-sidebar ${showSidebar ? "open" : "collapsed"}`}>
+        <div className="workspace-sidebar-head">
+          <button
+            className="workspace-sidebar-toggle"
+            onClick={toggleSidebar}
+            type="button"
+            aria-label={showSidebar ? "Collapse sidebar" : "Expand sidebar"}
+          >
+            <SparkIcon />
+          </button>
+          <div className="workspace-brand">
+            <div className="logo-icon">S</div>
+            <div>
+              <strong>SangamAI</strong>
+              <span>Personal workspace</span>
+            </div>
+          </div>
         </div>
 
-        <div className="sidebar-user">
-          <div className="user-name">{me.displayName}</div>
-          <div className="user-handle">@{me.username}</div>
+        <div className="workspace-sidebar-scroll">
+          <button
+            className="workspace-primary-action"
+            type="button"
+            onClick={() => navigate("/app")}
+          >
+            <span className="workspace-icon-pill">+</span>
+            New Chat
+          </button>
+
+          <nav className="workspace-nav">
+            <NavLink
+              to="/app"
+              end
+              className={({ isActive }) => `workspace-nav-link ${isActive ? "active" : ""}`}
+            >
+              <span className="workspace-nav-icon">◎</span>
+              <span>Home</span>
+            </NavLink>
+            <NavLink
+              to="/app/projects"
+              className={({ isActive }) => `workspace-nav-link ${isActive ? "active" : ""}`}
+            >
+              <span className="workspace-nav-icon">◇</span>
+              <span>Projects</span>
+            </NavLink>
+            <NavLink
+              to="/app/environments"
+              className={({ isActive }) => `workspace-nav-link ${isActive ? "active" : ""}`}
+            >
+              <span className="workspace-nav-icon">◫</span>
+              <span>Environments</span>
+            </NavLink>
+          </nav>
+
+          <div className="workspace-recent-section">
+            <div className="workspace-section-label">Recent</div>
+            <div className="workspace-recent-list">
+              {recentChats.length === 0 ? (
+                <div className="workspace-recent-empty">
+                  Personal chat history will appear here.
+                </div>
+              ) : (
+                recentChats.map((chat) => (
+                  <button
+                    key={chat.id}
+                    className="workspace-recent-item"
+                    type="button"
+                    onClick={() => navigate("/app")}
+                  >
+                    <strong>{chat.title}</strong>
+                    <span>{chat.preview}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
         </div>
 
-        <nav className="sidebar-menu">
-          <NavLink
-            to="/app/profile"
-            className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
-            onClick={closeMobile}
-          >
-            <span className="link-icon">👤</span>
-            My Profile
-          </NavLink>
-          <NavLink
-            to="/app/environments"
-            className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
-            onClick={closeMobile}
-          >
-            <span className="link-icon">🏠</span>
-            Environments
-          </NavLink>
-          <NavLink
-            to="/app/friends"
-            className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}
-            onClick={closeMobile}
-          >
-            <span className="link-icon">👥</span>
-            Friends
-          </NavLink>
-        </nav>
-
-        <div className="sidebar-bottom">
-          {/* Dark mode toggle */}
-          <button className="theme-toggle" onClick={toggleTheme} type="button">
-            <span className="link-icon">{theme === "dark" ? "🌙" : "☀️"}</span>
-            {theme === "dark" ? "Dark Mode" : "Light Mode"}
+        <div className="workspace-sidebar-foot">
+          <button className="theme-toggle workspace-theme-toggle" onClick={toggleTheme} type="button">
+            <span className="link-icon">{theme === "dark" ? "◐" : "◑"}</span>
+            {theme === "dark" ? "Dark mode" : "Light mode"}
             <div className={`toggle-track ${theme === "dark" ? "active" : ""}`} />
           </button>
 
+          <NavLink
+            to="/app/profile"
+            className={({ isActive }) => `workspace-profile-chip ${isActive ? "active" : ""}`}
+          >
+            <div className="workspace-profile-avatar">
+              {me.displayName.charAt(0).toUpperCase()}
+            </div>
+            <div className="workspace-profile-copy">
+              <strong>{me.displayName}</strong>
+              <span>{me.email}</span>
+            </div>
+          </NavLink>
+
           <button
-            className="btn"
+            className="workspace-logout"
             onClick={() => {
               closeMobile();
               onLogout();
             }}
+            type="button"
           >
-            🚪 Logout
+            Logout
           </button>
         </div>
       </aside>
 
-      {/* main content */}
-      <main className={`app-main ${collapsed ? "expanded" : ""}`}>
+      <main className={`workspace-main ${showSidebar ? "" : "expanded"}`}>
         <div className="app-content">{children}</div>
       </main>
     </div>
+  );
+}
+
+function SparkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 2.5 13.9 8l5.6 1.9-5.6 1.9L12 17.5l-1.9-5.7L4.5 9.9 10.1 8 12 2.5Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M18.5 16.5 19.3 19l2.2.8-2.2.7-.8 2.5-.8-2.5-2.2-.7 2.2-.8.8-2.5Z"
+        fill="currentColor"
+      />
+    </svg>
   );
 }

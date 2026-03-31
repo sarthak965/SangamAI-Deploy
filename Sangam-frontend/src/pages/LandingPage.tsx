@@ -6,7 +6,7 @@ import { useTheme } from "../lib/theme";
 /* ── constants ─────────────────────────────────────────────── */
 const TAGLINE =
   "Slack for AI — collaborate with friends on projects over the same AI chat and shared context.";
-const WORD_REVEAL_DELAY_MS = 60;
+const WORD_REVEAL_DELAY_MS = 100;
 
 interface Feature {
   icon: string;
