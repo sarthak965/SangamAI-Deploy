@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../lib/api";
+import Modal from "../components/Modal";
 import type { CurrentUser, UserProfileResponse } from "../types";
 
 export default function FriendProfilePage({
@@ -37,13 +38,27 @@ export default function FriendProfilePage({
   }
 
   const isSelf = profile.id === me.id || profile.friendshipStatus === "SELF";
+  const removeFriend = async () => {
+    if (!profile) return;
+    setBusyKey("remove-friend");
+    setError(null);
+    try {
+      await api.removeFriend(token, profile.id);
+      setConfirmRemove(false);
+      await loadProfile();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to remove friend");
+    } finally {
+      setBusyKey(null);
+    }
+  };
 
   return (
     <div className="friend-profile-page">
       {error && <div className="error-banner">{error}</div>}
 
       <button className="project-back-link" type="button" onClick={() => navigate("/app/friends")}>
-        ← Back to friends
+        {"<- Back to friends"}
       </button>
 
       <section className="friend-profile-card">
@@ -108,39 +123,25 @@ export default function FriendProfilePage({
       </section>
 
       {confirmRemove && (
-        <div className="dialog-backdrop" onClick={() => setConfirmRemove(false)}>
-          <div className="dialog-card profile-dialog-card" onClick={(event) => event.stopPropagation()}>
-            <div className="dialog-head profile-dialog-head">
-              <div>
-                <h3>Remove friend</h3>
-                <p>Remove @{profile.username} from your friends list?</p>
-              </div>
-              <button type="button" className="project-dialog-close" onClick={() => setConfirmRemove(false)}>
-                ×
-              </button>
+        <Modal onClose={() => setConfirmRemove(false)} className="dialog-card profile-dialog-card">
+          <div className="dialog-head profile-dialog-head">
+            <div>
+              <h3>Remove friend</h3>
+              <p>Remove @{profile.username} from your friends list?</p>
             </div>
-            <div className="dialog-actions">
-              <button className="btn btn-secondary" type="button" onClick={() => setConfirmRemove(false)}>
-                Cancel
-              </button>
-              <button
-                className="btn dialog-danger"
-                type="button"
-                disabled={busyKey === "remove-friend"}
-                onClick={() => {
-                  setBusyKey("remove-friend");
-                  setError(null);
-                  api.removeFriend(token, profile.id)
-                    .then(() => navigate("/app/friends"))
-                    .catch((err: Error) => setError(err.message))
-                    .finally(() => setBusyKey(null));
-                }}
-              >
-                {busyKey === "remove-friend" ? "Removing..." : "Remove friend"}
-              </button>
-            </div>
+            <button type="button" className="project-dialog-close" onClick={() => setConfirmRemove(false)}>
+              x
+            </button>
           </div>
-        </div>
+          <div className="dialog-actions">
+            <button className="btn btn-secondary" type="button" onClick={() => setConfirmRemove(false)}>
+              Cancel
+            </button>
+            <button className="btn dialog-danger" type="button" onClick={() => void removeFriend()}>
+              Remove friend
+            </button>
+          </div>
+        </Modal>
       )}
     </div>
   );
@@ -160,3 +161,8 @@ function friendshipLabel(status: UserProfileResponse["friendshipStatus"]) {
       return "Not connected";
   }
 }
+
+
+
+
+

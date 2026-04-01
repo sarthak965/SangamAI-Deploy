@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
+import Modal from "../components/Modal";
 import type {
   FriendUser,
   ProjectFileResponse,
@@ -52,15 +53,17 @@ export default function ProjectsPage({
   onWorkspaceChanged: () => Promise<void>;
 }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [projects, setProjects] = useState<ProjectResponse[]>([]);
-  const [personalChats, setPersonalChats] = useState<SoloChatSummaryResponse[]>([]);
+  const [projectChats, setProjectChats] = useState<SoloChatSummaryResponse[]>([]);
   const [groupSessions, setGroupSessions] = useState<SessionListItem[]>([]);
   const [selectedType, setSelectedType] = useState<ProjectType>("chooser");
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
   const [search, setSearch] = useState("");
+  const [loadingProjects, setLoadingProjects] = useState(true);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -68,6 +71,11 @@ export default function ProjectsPage({
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [instructionsOpen, setInstructionsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [projectDeleteTarget, setProjectDeleteTarget] = useState<ProjectResponse | null>(null);
+  const [projectChatDeleteTarget, setProjectChatDeleteTarget] =
+    useState<SoloChatSummaryResponse | null>(null);
+  const [projectSessionDeleteTarget, setProjectSessionDeleteTarget] =
+    useState<SessionListItem | null>(null);
   const [friendPrompt, setFriendPrompt] = useState<FriendUser | null>(null);
   const [editForm, setEditForm] = useState<EditForm>({
     name: "",
@@ -90,17 +98,15 @@ export default function ProjectsPage({
     setProjects(data);
   };
 
-  const loadPersonalChats = async () => {
-    const data = await api.listSoloChats(token);
-    setPersonalChats(data);
-  };
-
   const loadAll = async () => {
-    await Promise.all([loadProjects(), loadPersonalChats()]);
+    await loadProjects();
   };
 
   useEffect(() => {
-    loadAll().catch((err: Error) => setError(err.message));
+    setLoadingProjects(true);
+    loadAll()
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoadingProjects(false));
   }, [token]);
 
   const selectedProject = useMemo(
@@ -113,19 +119,45 @@ export default function ProjectsPage({
       setMemoryEntries([]);
       setProjectFiles([]);
       setGroupSessions([]);
+      setProjectChats([]);
       return;
     }
 
-    Promise.all([
+    const requests: Promise<unknown>[] = [
       api.listProjectMemoryEntries(token, selectedProjectId),
       api.listProjectFiles(token, selectedProjectId),
-    ])
-      .then(([memoryData, fileData]) => {
+    ];
+
+    if (selectedProject?.type === "PERSONAL") {
+      requests.push(api.listProjectChats(token, selectedProjectId));
+    }
+
+    Promise.all(requests)
+      .then((results) => {
+        const [memoryData, fileData, chatData] = results as [
+          ProjectMemoryEntryResponse[],
+          ProjectFileResponse[],
+          SoloChatSummaryResponse[] | undefined,
+        ];
         setMemoryEntries(memoryData);
         setProjectFiles(fileData);
+        setProjectChats(chatData ?? []);
       })
       .catch((err: Error) => setError(err.message));
-  }, [selectedProjectId, token]);
+  }, [selectedProject?.type, selectedProjectId, token]);
+
+  useEffect(() => {
+    const requestedType = searchParams.get("type");
+    const requestedProjectId = searchParams.get("projectId");
+
+    if (requestedType === "personal" || requestedType === "group" || requestedType === "chooser") {
+      setSelectedType(requestedType);
+    }
+
+    if (requestedProjectId) {
+      setSelectedProjectId(requestedProjectId);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     if (!selectedProject?.environmentId || selectedProject.type !== "GROUP") {
@@ -181,12 +213,20 @@ export default function ProjectsPage({
     });
   }, [projects, search, selectedType]);
 
-  const projectPersonalChats = useMemo(() => {
-    if (!selectedProject || selectedProject.type !== "PERSONAL") return [];
-    return personalChats
-      .filter((chat) => chat.projectId === selectedProject.id)
-      .sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt));
-  }, [personalChats, selectedProject]);
+  const personalProjects = useMemo(
+    () => filteredProjects.filter((project) => project.type === "PERSONAL"),
+    [filteredProjects],
+  );
+
+  const groupProjects = useMemo(
+    () => filteredProjects.filter((project) => project.type === "GROUP"),
+    [filteredProjects],
+  );
+
+  const projectPersonalChats = useMemo(
+    () => [...projectChats].sort((a, b) => +new Date(b.updatedAt) - +new Date(a.updatedAt)),
+    [projectChats],
+  );
 
   const displayedMemory = useMemo(() => {
     if (!selectedProject) return "";
@@ -260,6 +300,7 @@ export default function ProjectsPage({
         setProjects((current) => [created, ...current]);
         setSelectedProjectId(created.id);
         setCreatingProject(false);
+        navigate(`/app/projects?type=${created.type === "GROUP" ? "group" : "personal"}&projectId=${created.id}`);
       } else if (selectedProject) {
         const updated = await api.updateProject(token, selectedProject.id, {
           ...editForm,
@@ -322,10 +363,10 @@ export default function ProjectsPage({
     setBusyKey("start-project-chat");
     setError(null);
     try {
-      const chat = await api.createSoloChat(token, { projectId: selectedProject.id });
-      await loadPersonalChats();
-      await onWorkspaceChanged();
-      navigate(`/app/chats/${chat.id}`);
+      const chat = await api.createProjectChat(token, selectedProject.id);
+      const chats = await api.listProjectChats(token, selectedProject.id);
+      setProjectChats(chats);
+      navigate(`/app/projects/${selectedProject.id}/chats/${chat.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to start project chat");
     } finally {
@@ -353,25 +394,54 @@ export default function ProjectsPage({
     }
   };
 
-  const deleteProject = async () => {
-    if (!selectedProject) return;
-    setBusyKey("delete-project");
+  const deleteProject = async (projectToDelete: ProjectResponse) => {
+    setBusyKey(`delete-project-${projectToDelete.id}`);
     setError(null);
     try {
-      await api.deleteProject(token, selectedProject.id);
-      setProjects((current) => current.filter((project) => project.id !== selectedProject.id));
-      setPersonalChats((current) =>
-        current.map((chat) =>
-          chat.projectId === selectedProject.id
-            ? { ...chat, projectId: null, projectName: null }
-            : chat,
-        ),
-      );
+      await api.deleteProject(token, projectToDelete.id);
+      const deletedProjectType = projectToDelete.type;
+      setProjects((current) => current.filter((project) => project.id !== projectToDelete.id));
+      setProjectChats([]);
+      setGroupSessions([]);
       setDeleteOpen(false);
-      setSelectedProjectId(null);
+      setProjectDeleteTarget(null);
+      if (selectedProjectId === projectToDelete.id) {
+        setSelectedProjectId(null);
+        navigate(`/app/projects?type=${deletedProjectType === "GROUP" ? "group" : "personal"}`);
+      }
       await onWorkspaceChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to delete project");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const deleteProjectChat = async (chat: SoloChatSummaryResponse) => {
+    setBusyKey(`delete-project-chat-${chat.id}`);
+    setError(null);
+    try {
+      await api.deleteSoloChat(token, chat.id);
+      setProjectChats((current) => current.filter((item) => item.id !== chat.id));
+      setProjectChatDeleteTarget(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete project chat");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const deleteProjectSession = async (session: SessionListItem) => {
+    setBusyKey(`delete-project-session-${session.sessionId}`);
+    setError(null);
+    try {
+      await api.deleteSession(token, session.sessionId);
+      setGroupSessions((current) =>
+        current.filter((item) => item.sessionId !== session.sessionId),
+      );
+      setProjectSessionDeleteTarget(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to delete project session");
     } finally {
       setBusyKey(null);
     }
@@ -436,6 +506,14 @@ export default function ProjectsPage({
 
   const removeCollaborator = (userId: string) => {
     setSelectedCollaborators((current) => current.filter((item) => item.id !== userId));
+  };
+
+  const openProjectDetail = (projectId: string) => {
+    const project = projects.find((item) => item.id === projectId);
+    setSelectedProjectId(projectId);
+    if (project) {
+      navigate(`/app/projects?type=${project.type === "GROUP" ? "group" : "personal"}&projectId=${projectId}`);
+    }
   };
 
   if (creatingProject) {
@@ -639,6 +717,7 @@ export default function ProjectsPage({
           onClick={() => {
             setSelectedProjectId(null);
             setMenuOpen(false);
+            navigate(`/app/projects?type=${isGroupProject ? "group" : "personal"}`);
           }}
         >
           ← All projects
@@ -721,15 +800,23 @@ export default function ProjectsPage({
                   </div>
                 ) : (
                   projectPersonalChats.map((chat) => (
-                    <button
-                      key={chat.id}
-                      type="button"
-                      className="project-chat-item"
-                      onClick={() => navigate(`/app/chats/${chat.id}`)}
-                    >
-                      <strong>{chat.title}</strong>
-                      <span>Last message {relativeTime(chat.updatedAt)}</span>
-                    </button>
+                    <div key={chat.id} className="project-chat-row">
+                      <button
+                        type="button"
+                        className="project-chat-item"
+                        onClick={() => navigate(`/app/projects/${selectedProject.id}/chats/${chat.id}`)}
+                      >
+                        <strong>{chat.title}</strong>
+                        <span>Last message {relativeTime(chat.updatedAt)}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setProjectChatDeleteTarget(chat)}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   ))
                 )
               ) : groupSessions.length === 0 ? (
@@ -739,17 +826,25 @@ export default function ProjectsPage({
                 </div>
               ) : (
                 groupSessions.map((session) => (
-                  <button
-                    key={session.sessionId}
-                    type="button"
-                    className="project-chat-item"
-                    onClick={() =>
-                      navigate(`/app/environments/${selectedProject.environmentId}/sessions/${session.sessionId}`)
-                    }
-                  >
-                    <strong>{session.title || "Untitled session"}</strong>
+                  <div key={session.sessionId} className="project-chat-row">
+                    <button
+                      type="button"
+                      className="project-chat-item"
+                      onClick={() =>
+                        navigate(`/app/environments/${selectedProject.environmentId}/sessions/${session.sessionId}`)
+                      }
+                    >
+                      <strong>{session.title || "Untitled session"}</strong>
                     <span>{session.createdBy} • {relativeTime(session.createdAt)}</span>
-                  </button>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setProjectSessionDeleteTarget(session)}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 ))
               )}
             </div>
@@ -963,12 +1058,61 @@ export default function ProjectsPage({
             title="Delete project"
             subtitle="This removes the project workspace. Personal chats stay in your history but lose the project attachment."
             onClose={() => setDeleteOpen(false)}
-            onSubmit={() => void deleteProject()}
-            submitLabel={busyKey === "delete-project" ? "Deleting..." : "Delete project"}
+            onSubmit={() => {
+              if (selectedProject) {
+                void deleteProject(selectedProject);
+              }
+            }}
+            submitLabel={
+              selectedProject && busyKey === `delete-project-${selectedProject.id}`
+                ? "Deleting..."
+                : "Delete project"
+            }
+            compact
             danger
           >
             <p className="project-delete-copy">
               Delete <strong>{selectedProject.name}</strong>?
+            </p>
+          </ProjectDialog>
+        )}
+
+        {projectChatDeleteTarget && (
+          <ProjectDialog
+            title="Delete project chat"
+            subtitle="This removes the chat from the project workspace permanently."
+            onClose={() => setProjectChatDeleteTarget(null)}
+            onSubmit={() => void deleteProjectChat(projectChatDeleteTarget)}
+            submitLabel={
+              busyKey === `delete-project-chat-${projectChatDeleteTarget.id}`
+                ? "Deleting..."
+                : "Delete chat"
+            }
+            compact
+            danger
+          >
+            <p className="project-delete-copy">
+              Delete <strong>{projectChatDeleteTarget.title}</strong>?
+            </p>
+          </ProjectDialog>
+        )}
+
+        {projectSessionDeleteTarget && (
+          <ProjectDialog
+            title="Delete project session"
+            subtitle="This removes the shared session from the project permanently."
+            onClose={() => setProjectSessionDeleteTarget(null)}
+            onSubmit={() => void deleteProjectSession(projectSessionDeleteTarget)}
+            submitLabel={
+              busyKey === `delete-project-session-${projectSessionDeleteTarget.sessionId}`
+                ? "Deleting..."
+                : "Delete session"
+            }
+            compact
+            danger
+          >
+            <p className="project-delete-copy">
+              Delete <strong>{projectSessionDeleteTarget.title || "Untitled session"}</strong>?
             </p>
           </ProjectDialog>
         )}
@@ -980,89 +1124,318 @@ export default function ProjectsPage({
     <div className="projects-hub">
       {error && <div className="error-banner">{error}</div>}
 
-      <section className="projects-hero">
-        <div className="projects-hero-copy">
-          <h1>{HERO_COPY[selectedType].title}</h1>
-          <p>{HERO_COPY[selectedType].description}</p>
+      <section className="projects-shell">
+        <header className="projects-header">
+          <div key={selectedType} className="projects-header-copy projects-header-copy-animated">
+            <h1>{HERO_COPY[selectedType].title}</h1>
+            <p>{HERO_COPY[selectedType].description}</p>
+          </div>
+          <ProjectTabs activeTab={selectedType} onChange={setSelectedType} />
+        </header>
+
+        <div className="projects-toolbar">
+          <div className="projects-search-shell">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="projects-search"
+              placeholder={
+                selectedType === "chooser"
+                  ? "Search personal and group projects"
+                  : selectedType === "personal"
+                    ? "Search personal projects"
+                    : "Search group projects"
+              }
+            />
+          </div>
         </div>
 
-        <div className="projects-type-row">
-          <button type="button" className="projects-primary-pill" onClick={() => setSelectedType("chooser")}>
-            Choose type
-          </button>
-          <div className="projects-type-switcher">
-            <button
-              type="button"
-              className={`projects-type-chip ${selectedType === "chooser" ? "active" : ""}`}
-              onClick={() => setSelectedType("chooser")}
-            >
-              Choose project
-            </button>
-            <button
-              type="button"
-              className={`projects-type-chip ${selectedType === "personal" ? "active" : ""}`}
-              onClick={() => setSelectedType("personal")}
-            >
-              Personal Project
-            </button>
-            <button
-              type="button"
-              className={`projects-type-chip ${selectedType === "group" ? "active" : ""}`}
-              onClick={() => setSelectedType("group")}
-            >
-              Group Project
-            </button>
+        <section className="projects-content-shell">
+          <div key={selectedType} className="projects-content-stage">
+            {selectedType === "chooser" ? (
+              <ChooseProject
+                personalCount={projects.filter((project) => project.type === "PERSONAL").length}
+                groupCount={projects.filter((project) => project.type === "GROUP").length}
+              />
+            ) : selectedType === "personal" ? (
+              <PersonalProject
+                loading={loadingProjects}
+                projects={personalProjects}
+                onCreate={openCreate}
+                onOpenProject={openProjectDetail}
+                onDeleteProject={setProjectDeleteTarget}
+              />
+            ) : (
+              <GroupProject
+                loading={loadingProjects}
+                projects={groupProjects}
+                onCreate={openCreate}
+                onOpenProject={openProjectDetail}
+                onDeleteProject={setProjectDeleteTarget}
+              />
+            )}
           </div>
-          <button type="button" className="projects-create-pill" onClick={openCreate}>
-            Create Project
-          </button>
-        </div>
+        </section>
       </section>
 
-      <section className="projects-library">
-        <div className="projects-search-shell">
-          <input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            className="projects-search"
-            placeholder="Search your projects"
-          />
-        </div>
+      {projectDeleteTarget && (
+        <ProjectDialog
+          title="Delete project"
+          subtitle="This removes the project workspace. Personal chats stay in your history but lose the project attachment."
+          onClose={() => setProjectDeleteTarget(null)}
+          onSubmit={() => void deleteProject(projectDeleteTarget)}
+          submitLabel={
+            busyKey === `delete-project-${projectDeleteTarget.id}`
+              ? "Deleting..."
+              : "Delete project"
+          }
+          compact
+          danger
+        >
+          <p className="project-delete-copy">
+            Delete <strong>{projectDeleteTarget.name}</strong>?
+          </p>
+        </ProjectDialog>
+      )}
+    </div>
+  );
+}
 
-        <div className="projects-library-head">
-          <div>
-            <h2>Your projects</h2>
-            <p>Personal projects give you private chats. Group projects turn the same shared context into collaborative sessions.</p>
+function ProjectTabs({
+  activeTab,
+  onChange,
+}: {
+  activeTab: ProjectType;
+  onChange: (tab: ProjectType) => void;
+}) {
+  return (
+    <div className="projects-tabs" role="tablist" aria-label="Project tabs">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeTab === "chooser"}
+        className={`projects-tab ${activeTab === "chooser" ? "active" : ""}`}
+        onClick={() => onChange("chooser")}
+      >
+        Choose Project
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeTab === "personal"}
+        className={`projects-tab ${activeTab === "personal" ? "active" : ""}`}
+        onClick={() => onChange("personal")}
+      >
+        Personal Project
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={activeTab === "group"}
+        className={`projects-tab ${activeTab === "group" ? "active" : ""}`}
+        onClick={() => onChange("group")}
+      >
+        Group Project
+      </button>
+    </div>
+  );
+}
+
+function ChooseProject({
+  personalCount,
+  groupCount,
+}: {
+  personalCount: number;
+  groupCount: number;
+}) {
+  return (
+    <div className="projects-choose">
+      <div className="projects-choose-card">
+        <span className="projects-choose-kicker">Workspace modes</span>
+        <h2>Pick the kind of project that matches how you work.</h2>
+        <p>
+          Personal projects keep context private and chat-based. Group projects keep the same
+          memory, instructions, and files, but switch the workspace into shared sessions.
+        </p>
+        <div className="projects-choose-stats">
+          <div className="projects-choose-stat">
+            <strong>{personalCount}</strong>
+            <span>Personal projects</span>
+          </div>
+          <div className="projects-choose-stat">
+            <strong>{groupCount}</strong>
+            <span>Group projects</span>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
 
-        {filteredProjects.length === 0 ? (
-          <div className="projects-empty">
-            <h3>No projects yet</h3>
-            <p>Create a personal or group project to keep context, instructions, memory, and files attached to a real workspace.</p>
+function PersonalProject({
+  loading,
+  projects,
+  onCreate,
+  onOpenProject,
+  onDeleteProject,
+}: {
+  loading: boolean;
+  projects: ProjectResponse[];
+  onCreate: () => void;
+  onOpenProject: (projectId: string) => void;
+  onDeleteProject: (project: ProjectResponse) => void;
+}) {
+  return (
+    <ProjectCollection
+      title="Personal projects"
+      description="Private workspaces where your chats carry the project context automatically."
+      loading={loading}
+      projects={projects}
+      emptyTitle="No personal projects yet"
+      emptyDescription="Create a personal project to keep files, instructions, and memory around your own workflow."
+      createLabel="Create Personal Project"
+      onCreate={onCreate}
+      onOpenProject={onOpenProject}
+      onDeleteProject={onDeleteProject}
+    />
+  );
+}
+
+function GroupProject({
+  loading,
+  projects,
+  onCreate,
+  onOpenProject,
+  onDeleteProject,
+}: {
+  loading: boolean;
+  projects: ProjectResponse[];
+  onCreate: () => void;
+  onOpenProject: (projectId: string) => void;
+  onDeleteProject: (project: ProjectResponse) => void;
+}) {
+  return (
+    <ProjectCollection
+      title="Group projects"
+      description="Shared workspaces where collaborators, files, memory, and instructions feed into sessions."
+      loading={loading}
+      projects={projects}
+      emptyTitle="No group projects yet"
+      emptyDescription="Create a group project to work with collaborators inside a shared session-based workspace."
+      createLabel="Create Group Project"
+      onCreate={onCreate}
+      onOpenProject={onOpenProject}
+      onDeleteProject={onDeleteProject}
+    />
+  );
+}
+
+function ProjectCollection({
+  title,
+  description,
+  loading,
+  projects,
+  emptyTitle,
+  emptyDescription,
+  createLabel,
+  onCreate,
+  onOpenProject,
+  onDeleteProject,
+}: {
+  title: string;
+  description: string;
+  loading: boolean;
+  projects: ProjectResponse[];
+  emptyTitle: string;
+  emptyDescription: string;
+  createLabel: string;
+  onCreate: () => void;
+  onOpenProject: (projectId: string) => void;
+  onDeleteProject: (project: ProjectResponse) => void;
+}) {
+  return (
+    <div className="projects-panel">
+      <div className="projects-panel-head">
+        <div>
+          <h2>{title}</h2>
+          <p>{description}</p>
+        </div>
+        <button type="button" className="projects-action-button" onClick={onCreate}>
+          {createLabel}
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="projects-grid">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="projects-grid-card projects-grid-card-skeleton" aria-hidden="true">
+              <div className="projects-skeleton projects-skeleton-badge" />
+              <div className="projects-skeleton projects-skeleton-title" />
+              <div className="projects-skeleton projects-skeleton-line" />
+              <div className="projects-skeleton projects-skeleton-line short" />
+            </div>
+          ))}
+        </div>
+      ) : projects.length === 0 ? (
+        <div className="projects-empty-state">
+          <div className="projects-empty-state-card">
+            <h3>{emptyTitle}</h3>
+            <p>{emptyDescription}</p>
+            <button type="button" className="projects-action-button" onClick={onCreate}>
+              {createLabel}
+            </button>
           </div>
-        ) : (
-          <div className="projects-grid">
-            {filteredProjects.map((project) => (
-              <button
-                key={project.id}
-                type="button"
-                className="projects-grid-card"
-                onClick={() => setSelectedProjectId(project.id)}
-              >
-                <div className="projects-grid-card-head">
-                  <span className={`project-type-badge ${project.type === "GROUP" ? "group" : "personal"}`}>
-                    {project.type === "GROUP" ? "Group Project" : "Personal Project"}
-                  </span>
-                  <span className="projects-grid-meta">{relativeTime(project.updatedAt)}</span>
-                </div>
-                <h3>{project.name}</h3>
-                <p>{project.description || "No description yet."}</p>
-              </button>
-            ))}
-          </div>
-        )}
-      </section>
+        </div>
+      ) : (
+        <div className="projects-grid">
+          {projects.map((project) => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              onOpen={onOpenProject}
+              onDelete={onDeleteProject}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProjectCard({
+  project,
+  onOpen,
+  onDelete,
+}: {
+  project: ProjectResponse;
+  onOpen: (projectId: string) => void;
+  onDelete: (project: ProjectResponse) => void;
+}) {
+  return (
+    <div className="projects-grid-card">
+      <button
+        type="button"
+        className="projects-grid-card-main"
+        onClick={() => onOpen(project.id)}
+      >
+        <div className="projects-grid-card-head">
+          <span className={`project-type-badge ${project.type === "GROUP" ? "group" : "personal"}`}>
+            {project.type === "GROUP" ? "Group Project" : "Personal Project"}
+          </span>
+          <span className="projects-grid-meta">{relativeTime(project.updatedAt)}</span>
+        </div>
+        <h3>{project.name}</h3>
+        <p>{project.description || "No description yet."}</p>
+      </button>
+      <div className="projects-grid-card-actions">
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => onDelete(project)}
+        >
+          Delete
+        </button>
+      </div>
     </div>
   );
 }
@@ -1074,6 +1447,7 @@ function ProjectDialog({
   onClose,
   onSubmit,
   submitLabel,
+  compact = false,
   danger = false,
 }: {
   title: string;
@@ -1082,38 +1456,39 @@ function ProjectDialog({
   onClose: () => void;
   onSubmit: () => void;
   submitLabel: string;
+  compact?: boolean;
   danger?: boolean;
 }) {
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
-      <div className="dialog-card project-dialog-card" onClick={(event) => event.stopPropagation()}>
-        <div className="dialog-head project-dialog-head">
-          <div>
-            <h3>{title}</h3>
-            <p>{subtitle}</p>
-          </div>
-          <button type="button" className="project-dialog-close" onClick={onClose}>
-            ×
-          </button>
+    <Modal
+      onClose={onClose}
+      className={`dialog-card project-dialog-card ${compact ? "project-dialog-card-compact" : ""}`}
+    >
+      <div className="dialog-head project-dialog-head">
+        <div>
+          <h3>{title}</h3>
+          <p>{subtitle}</p>
         </div>
-        <div className="dialog-body project-dialog-body">{children}</div>
-        <div className="dialog-actions">
-          <button className="btn btn-secondary" type="button" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            className={`btn ${danger ? "dialog-danger" : "btn-primary"}`}
-            type="button"
-            onClick={onSubmit}
-          >
-            {submitLabel}
-          </button>
-        </div>
+        <button type="button" className="project-dialog-close" onClick={onClose}>
+          x
+        </button>
       </div>
-    </div>
+      <div className="dialog-body project-dialog-body">{children}</div>
+      <div className="dialog-actions">
+        <button className="btn btn-secondary" type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          className={`btn ${danger ? "dialog-danger" : "btn-primary"}`}
+          type="button"
+          onClick={onSubmit}
+        >
+          {submitLabel}
+        </button>
+      </div>
+    </Modal>
   );
 }
-
 function MemberAvatar({ member }: { member: FriendUser | ProjectMemberResponse }) {
   if (member.hasAvatar) {
     return (
@@ -1172,3 +1547,5 @@ function formatFileSize(size: number) {
 function mapUiProjectType(projectType: ProjectType): BackingProjectType {
   return projectType === "group" ? "GROUP" : "PERSONAL";
 }
+
+

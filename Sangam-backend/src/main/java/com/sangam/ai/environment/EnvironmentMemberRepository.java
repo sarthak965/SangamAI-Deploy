@@ -18,4 +18,6 @@ public interface EnvironmentMemberRepository extends JpaRepository<EnvironmentMe
 
     // Is this user already a member?
     boolean existsByEnvironmentIdAndUserId(UUID environmentId, UUID userId);
+
+    void deleteByEnvironmentId(UUID environmentId);
 }

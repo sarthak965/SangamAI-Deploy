@@ -104,4 +104,13 @@ public class SessionController {
         return ResponseEntity.ok(ApiResponse.ok(
                 sessionService.getSessionsForEnvironment(environmentId, currentUser)));
     }
+
+    @DeleteMapping("/sessions/{sessionId}")
+    public ResponseEntity<ApiResponse<Void>> deleteSession(
+            @PathVariable UUID sessionId,
+            @AuthenticationPrincipal User currentUser) {
+
+        sessionService.removeSession(sessionId, currentUser);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
 }

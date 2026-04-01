@@ -297,6 +297,29 @@ export const api = {
     );
   },
 
+  listProjectChats(token: string, projectId: string) {
+    return request<SoloChatSummaryResponse[]>(
+      `/api/workspace/projects/${projectId}/chats`,
+      {},
+      token,
+    );
+  },
+
+  createProjectChat(
+    token: string,
+    projectId: string,
+    body: { title?: string } = {},
+  ) {
+    return request<SoloChatDetailResponse>(
+      `/api/workspace/projects/${projectId}/chats`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      token,
+    );
+  },
+
   getSoloChat(token: string, chatId: string) {
     return request<SoloChatDetailResponse>(
       `/api/workspace/chats/${chatId}`,
@@ -424,6 +447,16 @@ export const api = {
     );
   },
 
+  deleteEnvironment(token: string, environmentId: string) {
+    return request<null>(
+      `/api/environments/${environmentId}`,
+      {
+        method: "DELETE",
+      },
+      token,
+    );
+  },
+
   getMembers(token: string, environmentId: string) {
     return request<MemberResponse[]>(
       `/api/environments/${environmentId}/members`,
@@ -490,6 +523,16 @@ export const api = {
     return request<SessionListItem[]>(
       `/api/environments/${environmentId}/sessions`,
       {},
+      token,
+    );
+  },
+
+  deleteSession(token: string, sessionId: string) {
+    return request<null>(
+      `/api/sessions/${sessionId}`,
+      {
+        method: "DELETE",
+      },
       token,
     );
   },

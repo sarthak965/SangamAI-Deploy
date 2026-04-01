@@ -89,6 +89,31 @@ public class WorkspaceController {
         ));
     }
 
+    @GetMapping("/projects/{projectId}/chats")
+    public ResponseEntity<ApiResponse<List<SoloChatSummaryResponse>>> listProjectChats(
+            @PathVariable UUID projectId,
+            @AuthenticationPrincipal User currentUser
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                workspaceService.listProjectChats(projectId, currentUser)
+        ));
+    }
+
+    @PostMapping("/projects/{projectId}/chats")
+    public ResponseEntity<ApiResponse<SoloChatDetailResponse>> createProjectChat(
+            @PathVariable UUID projectId,
+            @Valid @RequestBody(required = false) CreateSoloChatRequest request,
+            @AuthenticationPrincipal User currentUser
+    ) {
+        CreateSoloChatRequest safeRequest = request == null
+                ? new CreateSoloChatRequest(null, null)
+                : request;
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(
+                workspaceService.createProjectChat(projectId, safeRequest, currentUser)
+        ));
+    }
+
     @GetMapping("/projects/{projectId}/files")
     public ResponseEntity<ApiResponse<List<ProjectFileResponse>>> listProjectFiles(
             @PathVariable UUID projectId,

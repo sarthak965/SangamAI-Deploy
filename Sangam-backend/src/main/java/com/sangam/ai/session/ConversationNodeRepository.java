@@ -9,4 +9,5 @@ public interface ConversationNodeRepository extends JpaRepository<ConversationNo
     List<ConversationNode> findByParentIdOrderByCreatedAtAsc(UUID parentId);
 
     List<ConversationNode> findBySessionIdAndDepthOrderByCreatedAtAsc(UUID sessionId, int depth);
+    void deleteBySessionId(UUID sessionId);
 }

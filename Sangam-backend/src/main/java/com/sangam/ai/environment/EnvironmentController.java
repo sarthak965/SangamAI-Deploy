@@ -96,4 +96,13 @@ public class EnvironmentController {
                 environmentService.updateMemberPermission(
                         environmentId, request, currentUser)));
     }
+
+    @DeleteMapping("/{environmentId}")
+    public ResponseEntity<ApiResponse<Void>> deleteEnvironment(
+            @PathVariable UUID environmentId,
+            @AuthenticationPrincipal User currentUser) {
+
+        environmentService.removeEnvironment(environmentId, currentUser);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
 }

@@ -2,6 +2,9 @@ package com.sangam.ai.environment;
 
 import com.sangam.ai.environment.dto.*;
 import com.sangam.ai.realtime.CentrifugoService;
+import com.sangam.ai.session.Session;
+import com.sangam.ai.session.SessionRepository;
+import com.sangam.ai.session.SessionService;
 import com.sangam.ai.user.User;
 import com.sangam.ai.user.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +22,8 @@ public class EnvironmentService {
     private final EnvironmentMemberRepository memberRepository;
     private final UserRepository userRepository;
     private final CentrifugoService centrifugoService;
+    private final SessionRepository sessionRepository;
+    private final SessionService sessionService;
 
     /**
      * Creates a new environment and automatically adds the creator as the owner
@@ -233,6 +238,23 @@ public class EnvironmentService {
                 .stream()
                 .map(EnvironmentResponse::from)
                 .toList();
+    }
+
+    @Transactional
+    public void removeEnvironment(UUID environmentId, User user) {
+        Environment environment = assertIsOwner(environmentId, user);
+
+        if (environment.isHidden()) {
+            throw new IllegalArgumentException("This environment is managed by a group project");
+        }
+
+        List<Session> sessions = sessionRepository.findByEnvironmentIdOrderByCreatedAtDesc(environmentId);
+        for (Session session : sessions) {
+            sessionService.deleteSessionData(session);
+        }
+
+        memberRepository.deleteByEnvironmentId(environmentId);
+        environmentRepository.delete(environment);
     }
 
     // ---- private helpers ----

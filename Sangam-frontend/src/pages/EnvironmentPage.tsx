@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../lib/api";
+import Modal from "../components/Modal";
 import { realtimeManager } from "../lib/realtime";
 import type {
   CurrentUser,
@@ -9,6 +10,11 @@ import type {
   MemberResponse,
   SessionListItem,
 } from "../types";
+
+type ConfirmState =
+  | { type: "environment"; environment: EnvironmentResponse }
+  | { type: "session"; session: SessionListItem }
+  | null;
 
 export default function EnvironmentPage({
   token,
@@ -24,6 +30,7 @@ export default function EnvironmentPage({
   const [sessions, setSessions] = useState<SessionListItem[]>([]);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmState, setConfirmState] = useState<ConfirmState>(null);
   const [newUsername, setNewUsername] = useState("");
   const [newSessionTitle, setNewSessionTitle] = useState("");
 
@@ -48,20 +55,15 @@ export default function EnvironmentPage({
     loadAll().catch((e: Error) => setError(e.message));
   }, [environmentId, token]);
 
-  /* realtime member updates */
   useEffect(() => {
     if (!environmentId) return;
     let active = true;
     let cleanup: (() => void) | null = null;
 
     realtimeManager
-      .subscribe<EnvironmentEventMemberUpdated>(
-        token,
-        `env:${environmentId}`,
-        () => {
-          if (active) void loadAll().catch((e: Error) => setError(e.message));
-        },
-      )
+      .subscribe<EnvironmentEventMemberUpdated>(token, `env:${environmentId}`, () => {
+        if (active) void loadAll().catch((e: Error) => setError(e.message));
+      })
       .then((unsub) => {
         if (active) cleanup = unsub;
         else unsub();
@@ -86,10 +88,8 @@ export default function EnvironmentPage({
     }
   };
 
-  const currentMember =
-    members.find((m) => m.username === me.username) ?? null;
-  const canManage =
-    currentMember?.role === "OWNER" || currentMember?.role === "CO_HOST";
+  const currentMember = members.find((m) => m.username === me.username) ?? null;
+  const canManage = currentMember?.role === "OWNER" || currentMember?.role === "CO_HOST";
   const canChangeRoles = currentMember?.role === "OWNER";
 
   if (!environmentId || !environment) {
@@ -103,7 +103,6 @@ export default function EnvironmentPage({
 
   return (
     <div>
-      {/* Header */}
       <div className="page-header">
         <div className="page-header-row">
           <div>
@@ -113,6 +112,15 @@ export default function EnvironmentPage({
               <span className="badge">{environment.inviteCode}</span>
             </div>
           </div>
+          {environment.hostUsername === me.username && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setConfirmState({ type: "environment", environment })}
+            >
+              Delete environment
+            </button>
+          )}
         </div>
         {environment.description && (
           <p style={{ marginTop: "0.5rem" }}>{environment.description}</p>
@@ -122,7 +130,6 @@ export default function EnvironmentPage({
       {error && <div className="error-banner">{error}</div>}
 
       <div className="env-detail-grid">
-        {/* Members panel */}
         <div className="panel">
           <div className="panel-header">
             <h3>Members</h3>
@@ -211,7 +218,6 @@ export default function EnvironmentPage({
           </div>
         </div>
 
-        {/* Sessions panel */}
         <div className="panel">
           <div className="panel-header">
             <h3>Sessions</h3>
@@ -230,9 +236,7 @@ export default function EnvironmentPage({
                 );
                 setNewSessionTitle("");
                 await loadAll();
-                navigate(
-                  `/app/environments/${environmentId}/sessions/${created.sessionId}`,
-                );
+                navigate(`/app/environments/${environmentId}/sessions/${created.sessionId}`);
               });
             }}
           >
@@ -258,29 +262,114 @@ export default function EnvironmentPage({
               </div>
             ) : (
               sessions.map((session) => (
-                <button
-                  key={session.sessionId}
-                  className="session-card"
-                  onClick={() =>
-                    navigate(
-                      `/app/environments/${environmentId}/sessions/${session.sessionId}`,
-                    )
-                  }
-                >
-                  <div className="session-card-info">
-                    <h4>{session.title || "Untitled"}</h4>
-                    <p>
-                      {session.createdBy} ·{" "}
-                      {new Date(session.createdAt).toLocaleDateString()}
-                    </p>
-                  </div>
-                  <span className="session-status">{session.status}</span>
-                </button>
+                <div key={session.sessionId} className="session-card">
+                  <button
+                    type="button"
+                    className="session-card-main"
+                    onClick={() =>
+                      navigate(`/app/environments/${environmentId}/sessions/${session.sessionId}`)
+                    }
+                  >
+                    <div className="session-card-info">
+                      <h4>{session.title || "Untitled"}</h4>
+                      <p>
+                        {session.createdBy} · {new Date(session.createdAt).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <span className="session-status">{session.status}</span>
+                  </button>
+                  {(canManage || session.createdBy === me.username) && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setConfirmState({ type: "session", session })}
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
               ))
             )}
           </div>
         </div>
       </div>
+
+      {confirmState && (
+        <ConfirmDialog
+          title={confirmState.type === "environment" ? "Delete environment" : "Delete session"}
+          body={
+            confirmState.type === "environment"
+              ? `Delete ${confirmState.environment.name}? This will permanently remove the environment and all its sessions.`
+              : `Delete ${confirmState.session.title || "this session"}? This cannot be undone.`
+          }
+          confirmLabel={
+            confirmState.type === "environment"
+              ? busyKey === "delete-environment"
+                ? "Deleting..."
+                : "Delete environment"
+              : busyKey === `delete-session-${confirmState.session.sessionId}`
+                ? "Deleting..."
+                : "Delete session"
+          }
+          onClose={() => setConfirmState(null)}
+          onConfirm={() => {
+            if (confirmState.type === "environment") {
+              void withBusy("delete-environment", async () => {
+                await api.deleteEnvironment(token, environment.id);
+                setConfirmState(null);
+                navigate("/app/environments");
+              });
+              return;
+            }
+
+            void withBusy(`delete-session-${confirmState.session.sessionId}`, async () => {
+              await api.deleteSession(token, confirmState.session.sessionId);
+              setConfirmState(null);
+              await loadAll();
+            });
+          }}
+          danger
+        />
+      )}
     </div>
   );
 }
+
+function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  onClose,
+  onConfirm,
+  danger = false,
+}: {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  onClose: () => void;
+  onConfirm: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <Modal onClose={onClose} className="dialog-card profile-dialog-card">
+      <div className="dialog-head profile-dialog-head">
+        <div>
+          <h3>{title}</h3>
+          <p>{body}</p>
+        </div>
+        <button type="button" className="project-dialog-close" onClick={onClose}>
+          x
+        </button>
+      </div>
+      <div className="dialog-actions">
+        <button className="btn btn-secondary" type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button className={`btn ${danger ? "dialog-danger" : "btn-primary"}`} type="button" onClick={onConfirm}>
+          {confirmLabel}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+

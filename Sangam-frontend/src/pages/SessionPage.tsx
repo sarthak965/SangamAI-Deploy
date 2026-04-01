@@ -18,6 +18,7 @@ import "prismjs/components/prism-sql";
 import "prismjs/components/prism-json";
 import "prismjs/components/prism-bash";
 import { api } from "../lib/api";
+import Modal from "../components/Modal";
 import { realtimeManager } from "../lib/realtime";
 import type {
   ConversationNodeDto,
@@ -61,6 +62,7 @@ export default function SessionPage({
   const [streamingNodes, setStreamingNodes] = useState<Record<string, StreamingNodeState>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [rootQuestion, setRootQuestion] = useState("");
   const [viewStack, setViewStack] = useState<ViewState[]>([{ type: "root", title: "Root" }]);
 
@@ -347,6 +349,14 @@ export default function SessionPage({
           )}
         </div>
         <div className="session-header-meta">
+          {(currentMember?.role === "OWNER" || currentMember?.role === "CO_HOST") && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setConfirmDelete(true)}
+            >
+              Delete session
+            </button>
+          )}
           <button
             className="btn btn-secondary btn-sm"
             onClick={() => navigate(`/app/environments/${environmentId}`)}
@@ -357,6 +367,24 @@ export default function SessionPage({
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+
+      {confirmDelete && selectedSession && (
+        <ConfirmDialog
+          title="Delete session"
+          body={`Delete ${selectedSession.title || "this session"}? This cannot be undone.`}
+          confirmLabel={busyKey === "delete-session" ? "Deleting..." : "Delete session"}
+          onClose={() => setConfirmDelete(false)}
+          onConfirm={() => {
+            if (!sessionId || !environmentId) return;
+            void withBusy("delete-session", async () => {
+              await api.deleteSession(token, sessionId);
+              setConfirmDelete(false);
+              navigate(`/app/environments/${environmentId}`);
+            });
+          }}
+          danger
+        />
+      )}
 
       {viewStack.length > 1 && (
         <div className="breadcrumb-nav">
@@ -602,6 +630,43 @@ export default function SessionPage({
   );
 }
 
+function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  onClose,
+  onConfirm,
+  danger = false,
+}: {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  onClose: () => void;
+  onConfirm: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <Modal onClose={onClose} className="dialog-card profile-dialog-card">
+      <div className="dialog-head profile-dialog-head">
+        <div>
+          <h3>{title}</h3>
+          <p>{body}</p>
+        </div>
+        <button type="button" className="project-dialog-close" onClick={onClose}>
+          x
+        </button>
+      </div>
+      <div className="dialog-actions">
+        <button className="btn btn-secondary" type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button className={`btn ${danger ? "dialog-danger" : "btn-primary"}`} type="button" onClick={onConfirm}>
+          {confirmLabel}
+        </button>
+      </div>
+    </Modal>
+  );
+}
 function findNode(root: ConversationNodeDto, nodeId: string): ConversationNodeDto | null {
   if (root.id === nodeId) return root;
   for (const child of root.children) {
@@ -1060,3 +1125,5 @@ function setViewportScrollTop(container: HTMLDivElement | null, top: number) {
     container.scrollTop = top;
   }
 }
+
+

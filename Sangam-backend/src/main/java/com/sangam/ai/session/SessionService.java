@@ -356,4 +356,36 @@ public class SessionService {
                 })
                 .toList();
     }
+
+    @Transactional
+    public void removeSession(UUID sessionId, User user) {
+        Session session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException("Session not found"));
+
+        EnvironmentMember member = memberRepository
+                .findByEnvironmentIdAndUserId(session.getEnvironment().getId(), user.getId())
+                .orElseThrow(() -> new SecurityException("You are not a member"));
+
+        boolean isOwner = session.getEnvironment().getHost().getId().equals(user.getId());
+        boolean isCoHost = member.getRole() == EnvironmentMember.Role.CO_HOST;
+        if (!isOwner && !isCoHost) {
+            throw new SecurityException("Only the environment owner or a co-host can delete sessions");
+        }
+
+        deleteSessionData(session);
+    }
+
+    @Transactional
+    public void deleteSessionData(Session session) {
+        List<ConversationNode> nodes = nodeRepository.findBySessionIdOrderByCreatedAtAsc(session.getId());
+        List<UUID> nodeIds = nodes.stream().map(ConversationNode::getId).toList();
+
+        if (!nodeIds.isEmpty()) {
+            paragraphRepository.deleteByNodeIdIn(nodeIds);
+            nodeRepository.deleteBySessionId(session.getId());
+        }
+
+        snapshotCacheService.invalidate(session.getId());
+        sessionRepository.delete(session);
+    }
 }

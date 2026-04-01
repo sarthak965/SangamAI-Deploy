@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import Modal from "../components/Modal";
 import type {
   CurrentUser,
   FriendRequestResponse,
@@ -371,30 +372,27 @@ function FriendsConfirmDialog({
   danger?: boolean;
 }) {
   return (
-    <div className="dialog-backdrop" onClick={onClose}>
-      <div className="dialog-card profile-dialog-card" onClick={(event) => event.stopPropagation()}>
-        <div className="dialog-head profile-dialog-head">
-          <div>
-            <h3>{title}</h3>
-            <p>{body}</p>
-          </div>
-          <button type="button" className="project-dialog-close" onClick={onClose}>
-            ×
-          </button>
+    <Modal onClose={onClose} className="dialog-card profile-dialog-card">
+      <div className="dialog-head profile-dialog-head">
+        <div>
+          <h3>{title}</h3>
+          <p>{body}</p>
         </div>
-        <div className="dialog-actions">
-          <button className="btn btn-secondary" type="button" onClick={onClose}>
-            Cancel
-          </button>
-          <button className={`btn ${danger ? "dialog-danger" : "btn-primary"}`} type="button" onClick={onConfirm}>
-            {confirmLabel}
-          </button>
-        </div>
+        <button type="button" className="project-dialog-close" onClick={onClose}>
+          x
+        </button>
       </div>
-    </div>
+      <div className="dialog-actions">
+        <button className="btn btn-secondary" type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button className={`btn ${danger ? "dialog-danger" : "btn-primary"}`} type="button" onClick={onConfirm}>
+          {confirmLabel}
+        </button>
+      </div>
+    </Modal>
   );
 }
-
 function relativeTime(iso: string) {
   const diff = Date.now() - new Date(iso).getTime();
   const minutes = Math.max(1, Math.floor(diff / 60000));
@@ -404,3 +402,5 @@ function relativeTime(iso: string) {
   const days = Math.floor(hours / 24);
   return `${days} day${days === 1 ? "" : "s"} ago`;
 }
+
+

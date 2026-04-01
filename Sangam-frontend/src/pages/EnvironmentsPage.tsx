@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
+import Modal from "../components/Modal";
 import type { EnvironmentResponse } from "../types";
 
 export default function EnvironmentsPage({ token }: { token: string }) {
@@ -8,6 +9,7 @@ export default function EnvironmentsPage({ token }: { token: string }) {
   const [environments, setEnvironments] = useState<EnvironmentResponse[]>([]);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmEnvironment, setConfirmEnvironment] = useState<EnvironmentResponse | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
   const [createForm, setCreateForm] = useState({ name: "", description: "" });
@@ -175,20 +177,85 @@ export default function EnvironmentsPage({ token }: { token: string }) {
           </div>
         ) : (
           environments.map((env) => (
-            <button
-              key={env.id}
-              className="env-card"
-              onClick={() => navigate(`/app/environments/${env.id}`)}
-            >
-              <div className="env-card-info">
-                <h4>{env.name}</h4>
-                <p>{env.description || "No description"}</p>
-              </div>
-              <span className="env-card-code">{env.inviteCode}</span>
-            </button>
+            <div key={env.id} className="env-card">
+              <button
+                className="env-card-main"
+                onClick={() => navigate(`/app/environments/${env.id}`)}
+              >
+                <div className="env-card-info">
+                  <h4>{env.name}</h4>
+                  <p>{env.description || "No description"}</p>
+                </div>
+                <span className="env-card-code">{env.inviteCode}</span>
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => setConfirmEnvironment(env)}
+              >
+                Delete
+              </button>
+            </div>
           ))
         )}
       </div>
+
+      {confirmEnvironment && (
+        <ConfirmDialog
+          title="Delete environment"
+          body={`Delete ${confirmEnvironment.name}? This will permanently remove the environment and all its sessions.`}
+          confirmLabel={busyKey === `delete-env-${confirmEnvironment.id}` ? "Deleting..." : "Delete environment"}
+          onClose={() => setConfirmEnvironment(null)}
+          onConfirm={() => {
+            void withBusy(`delete-env-${confirmEnvironment.id}`, async () => {
+              await api.deleteEnvironment(token, confirmEnvironment.id);
+              setConfirmEnvironment(null);
+              await loadEnvironments();
+              navigate("/app/environments");
+            });
+          }}
+          danger
+        />
+      )}
     </div>
   );
 }
+
+function ConfirmDialog({
+  title,
+  body,
+  confirmLabel,
+  onClose,
+  onConfirm,
+  danger = false,
+}: {
+  title: string;
+  body: string;
+  confirmLabel: string;
+  onClose: () => void;
+  onConfirm: () => void;
+  danger?: boolean;
+}) {
+  return (
+    <Modal onClose={onClose} className="dialog-card profile-dialog-card">
+      <div className="dialog-head profile-dialog-head">
+        <div>
+          <h3>{title}</h3>
+          <p>{body}</p>
+        </div>
+        <button type="button" className="project-dialog-close" onClick={onClose}>
+          x
+        </button>
+      </div>
+      <div className="dialog-actions">
+        <button className="btn btn-secondary" type="button" onClick={onClose}>
+          Cancel
+        </button>
+        <button className={`btn ${danger ? "dialog-danger" : "btn-primary"}`} type="button" onClick={onConfirm}>
+          {confirmLabel}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+

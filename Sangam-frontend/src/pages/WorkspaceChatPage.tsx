@@ -29,7 +29,7 @@ export default function WorkspaceChatPage({
   onWorkspaceChanged: () => Promise<void>;
 }) {
   const navigate = useNavigate();
-  const { chatId } = useParams();
+  const { chatId, projectId } = useParams();
   const [chat, setChat] = useState<SoloChatDetailResponse | null>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -178,9 +178,20 @@ export default function WorkspaceChatPage({
               : "Personal standalone chat"}
           </p>
         </div>
-        <button className="btn btn-secondary btn-sm" type="button" onClick={() => navigate("/app")}>
-          Back Home
-        </button>
+        <div className="workspace-chat-header-actions">
+          {projectId ? (
+            <button
+              className="btn btn-secondary btn-sm"
+              type="button"
+              onClick={() => navigate(`/app/projects?type=personal&projectId=${projectId}`)}
+            >
+              Back to Project
+            </button>
+          ) : null}
+          <button className="btn btn-secondary btn-sm" type="button" onClick={() => navigate("/app")}>
+            Back Home
+          </button>
+        </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}

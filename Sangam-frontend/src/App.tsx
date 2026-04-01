@@ -167,6 +167,15 @@ function App() {
                     }
                   />
                   <Route
+                    path="projects/:projectId/chats/:chatId"
+                    element={
+                      <WorkspaceChatPage
+                        token={token}
+                        onWorkspaceChanged={refreshWorkspaceData}
+                      />
+                    }
+                  />
+                  <Route
                     path="history"
                     element={
                       <HistoryPage

@@ -1,5 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import { api } from "../lib/api";
+import Modal from "./Modal";
 import type { ProjectResponse, SoloChatSummaryResponse } from "../types";
 
 type DialogState =
@@ -21,15 +29,25 @@ export default function ChatOverflowMenu({
   onChanged: () => Promise<void>;
   onDeleted?: (chatId: string) => void;
 }) {
+  const personalProjects = projects.filter((project) => project.type === "PERSONAL");
   const [open, setOpen] = useState(false);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuPortalRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [menuStyle, setMenuStyle] = useState<{ top: number; left: number } | null>(
+    null,
+  );
 
   useEffect(() => {
     const onPointerDown = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (
+        !menuRef.current?.contains(target) &&
+        !menuPortalRef.current?.contains(target)
+      ) {
         setOpen(false);
       }
     };
@@ -37,6 +55,60 @@ export default function ChatOverflowMenu({
     document.addEventListener("mousedown", onPointerDown);
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, []);
+
+  const updateMenuPosition = () => {
+    if (!triggerRef.current || !menuPortalRef.current) {
+      return;
+    }
+
+    const rect = triggerRef.current.getBoundingClientRect();
+    const menuWidth = menuPortalRef.current.offsetWidth;
+    const menuHeight = menuPortalRef.current.offsetHeight;
+    const gap = 6;
+    const padding = 8;
+
+    let left = rect.right - menuWidth;
+    let top = rect.bottom + gap;
+
+    if (left < padding) {
+      left = padding;
+    }
+    if (left + menuWidth > window.innerWidth - padding) {
+      left = Math.max(padding, window.innerWidth - padding - menuWidth);
+    }
+
+    if (top + menuHeight > window.innerHeight - padding) {
+      top = rect.top - menuHeight - gap;
+    }
+    if (top < padding) {
+      top = padding;
+    }
+
+    setMenuStyle({ top, left });
+  };
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuStyle(null);
+      return;
+    }
+    updateMenuPosition();
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    const handleResize = () => updateMenuPosition();
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("scroll", handleResize, true);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("scroll", handleResize, true);
+    };
+  }, [open]);
 
   const runAction = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -74,6 +146,7 @@ export default function ChatOverflowMenu({
           type="button"
           aria-label="Chat actions"
           aria-expanded={open}
+          ref={triggerRef}
           onClick={(event) => {
             event.stopPropagation();
             setOpen((current) => !current);
@@ -82,53 +155,64 @@ export default function ChatOverflowMenu({
           <span aria-hidden="true">...</span>
         </button>
 
-        {open && (
-          <div className="chat-overflow-menu">
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                void runAction(async () => {
-                  await api.updateSoloChat(token, chat.id, { pinned: !chat.pinned });
-                });
+        {open &&
+          createPortal(
+            <div
+              className="chat-overflow-menu"
+              ref={menuPortalRef}
+              style={{
+                position: "fixed",
+                zIndex: 999999,
+                top: menuStyle?.top ?? 0,
+                left: menuStyle?.left ?? 0,
               }}
             >
-              <PinIcon />
-              <span>{chat.pinned ? "Unpin chat" : "Pin chat"}</span>
-            </button>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                openDialog({ type: "rename", value: chat.title });
-              }}
-            >
-              <RenameIcon />
-              <span>Rename</span>
-            </button>
-            <button
-              type="button"
-              onClick={(event) => {
-                event.stopPropagation();
-                openDialog({ type: "move", value: chat.projectId ?? "" });
-              }}
-            >
-              <ProjectIcon />
-              <span>{chat.projectId ? "Move to project" : "Add to project"}</span>
-            </button>
-            <button
-              type="button"
-              className="danger"
-              onClick={(event) => {
-                event.stopPropagation();
-                openDialog({ type: "delete" });
-              }}
-            >
-              <DeleteIcon />
-              <span>Delete</span>
-            </button>
-          </div>
-        )}
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void runAction(async () => {
+                    await api.updateSoloChat(token, chat.id, { pinned: !chat.pinned });
+                  });
+                }}
+              >
+                <PinIcon />
+                <span>{chat.pinned ? "Unpin chat" : "Pin chat"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openDialog({ type: "rename", value: chat.title });
+                }}
+              >
+                <RenameIcon />
+                <span>Rename</span>
+              </button>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openDialog({ type: "move", value: chat.projectId ?? "" });
+                }}
+              >
+                <ProjectIcon />
+                <span>{chat.projectId ? "Move to project" : "Add to project"}</span>
+              </button>
+              <button
+                type="button"
+                className="danger"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  openDialog({ type: "delete" });
+                }}
+              >
+                <DeleteIcon />
+                <span>Delete</span>
+              </button>
+            </div>,
+            document.body,
+          )}
       </div>
 
       {dialog?.type === "rename" && (
@@ -196,7 +280,7 @@ export default function ChatOverflowMenu({
             autoFocus
           >
             <option value="">No project</option>
-            {projects.map((project) => (
+            {personalProjects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}
               </option>
@@ -285,27 +369,28 @@ function ActionDialog({
   children: ReactNode;
 }) {
   return (
-    <div className="dialog-backdrop" onClick={onCancel}>
-      <div className="dialog-card" onClick={(event) => event.stopPropagation()}>
-        <div className="dialog-head">
-          <h3>{title}</h3>
-        </div>
-        <div className="dialog-body">{children}</div>
-        {error && <div className="dialog-error">{error}</div>}
-        <div className="dialog-actions">
-          <button className="btn btn-secondary" type="button" disabled={busy} onClick={onCancel}>
-            Cancel
-          </button>
-          <button
-            className={`btn ${danger ? "dialog-danger" : "btn-primary"}`}
-            type="button"
-            disabled={busy}
-            onClick={onConfirm}
-          >
-            {busy ? "Working..." : confirmLabel}
-          </button>
-        </div>
+    <Modal onClose={onCancel} className="dialog-card">
+      <div className="dialog-head">
+        <h3>{title}</h3>
       </div>
-    </div>
+      <div className="dialog-body">{children}</div>
+      {error && <div className="dialog-error">{error}</div>}
+      <div className="dialog-actions">
+        <button className="btn btn-secondary" type="button" disabled={busy} onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          className={`btn ${danger ? "dialog-danger" : "btn-primary"}`}
+          type="button"
+          disabled={busy}
+          onClick={onConfirm}
+        >
+          {busy ? "Working..." : confirmLabel}
+        </button>
+      </div>
+    </Modal>
   );
 }
+
+
+

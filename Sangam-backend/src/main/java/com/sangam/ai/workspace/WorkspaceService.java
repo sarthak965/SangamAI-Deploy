@@ -196,7 +196,7 @@ public class WorkspaceService {
     }
 
     public List<SoloChatSummaryResponse> listChats(User user) {
-        return soloChatRepository.findByOwnerOrderByPinnedDescUpdatedAtDesc(user)
+        return soloChatRepository.findByOwnerAndProjectIsNullOrderByPinnedDescUpdatedAtDesc(user)
                 .stream()
                 .map(this::toSummary)
                 .toList();
@@ -226,6 +226,30 @@ public class WorkspaceService {
         return toDetail(saved);
     }
 
+    public List<SoloChatSummaryResponse> listProjectChats(UUID projectId, User user) {
+        Project project = getAccessibleProject(projectId, user);
+        ensurePersonalProject(project);
+        return soloChatRepository.findByProjectOrderByUpdatedAtDesc(project)
+                .stream()
+                .map(this::toSummary)
+                .toList();
+    }
+
+    @Transactional
+    public SoloChatDetailResponse createProjectChat(UUID projectId, CreateSoloChatRequest request, User user) {
+        Project project = getAccessibleProject(projectId, user);
+        ensurePersonalProject(project);
+
+        SoloChat chat = SoloChat.builder()
+                .owner(user)
+                .project(project)
+                .title(normalizeTitle(request.title()))
+                .build();
+
+        SoloChat saved = soloChatRepository.save(chat);
+        return toDetail(saved);
+    }
+
     public SoloChatDetailResponse getChat(UUID chatId, User user) {
         return toDetail(getOwnedChat(chatId, user));
     }
@@ -241,7 +265,9 @@ public class WorkspaceService {
             chat.setPinned(request.pinned());
         }
         if (request.projectId() != null) {
-            chat.setProject(getOwnedProject(request.projectId(), user));
+            Project project = getOwnedProject(request.projectId(), user);
+            ensurePersonalProject(project);
+            chat.setProject(project);
         }
 
         chat.setUpdatedAt(Instant.now());
@@ -283,12 +309,13 @@ public class WorkspaceService {
         soloChatRepository.save(chat);
 
         List<AiMessage> messages = buildAiMessages(chat, content);
-        streamAssistantReply(chat.getId(), assistantMessage.getId(), messages);
+        streamAssistantReply(chat, assistantMessage.getId(), content, messages);
 
         return toDetail(chat);
     }
 
-    private void streamAssistantReply(UUID chatId, UUID messageId, List<AiMessage> messages) {
+    private void streamAssistantReply(SoloChat chat, UUID messageId, String userPrompt, List<AiMessage> messages) {
+        UUID chatId = chat.getId();
         StringBuilder fullReply = new StringBuilder();
 
         aiProvider.streamResponse(messages)
@@ -300,10 +327,12 @@ public class WorkspaceService {
                 .doOnError(error -> {
                     log.error("Streaming failed for solo chat {}", chatId, error);
                     finalizeMessage(messageId, fullReply.toString(), SoloChatMessage.Status.COMPLETE);
+                    persistProjectConversationMemory(chat, userPrompt, fullReply.toString());
                     centrifugoService.publishSoloChatComplete(chatId, messageId);
                 })
                 .doOnComplete(() -> {
                     finalizeMessage(messageId, fullReply.toString(), SoloChatMessage.Status.COMPLETE);
+                    persistProjectConversationMemory(chat, userPrompt, fullReply.toString());
                     centrifugoService.publishSoloChatComplete(chatId, messageId);
                 })
                 .subscribe();
@@ -398,6 +427,12 @@ public class WorkspaceService {
     private Project getOwnedProject(UUID projectId, User user) {
         return projectRepository.findByIdAndOwner(projectId, user)
                 .orElseThrow(() -> new IllegalArgumentException("Project not found"));
+    }
+
+    private void ensurePersonalProject(Project project) {
+        if (project.getType() == Project.Type.GROUP) {
+            throw new IllegalArgumentException("Group projects use sessions instead of personal chats");
+        }
     }
 
     private Project getAccessibleProject(UUID projectId, User user) {
@@ -503,6 +538,50 @@ public class WorkspaceService {
         }
 
         return builder.toString();
+    }
+
+    private void persistProjectConversationMemory(SoloChat chat, String userPrompt, String assistantReply) {
+        if (chat.getProject() == null) {
+            return;
+        }
+
+        String normalizedUserPrompt = normalizeMemorySnippet(userPrompt, 220);
+        String normalizedAssistantReply = normalizeMemorySnippet(assistantReply, 420);
+        if (normalizedUserPrompt.isBlank() && normalizedAssistantReply.isBlank()) {
+            return;
+        }
+
+        StringBuilder memory = new StringBuilder("Recent project conversation update:");
+        if (!normalizedUserPrompt.isBlank()) {
+            memory.append("\nUser asked: ").append(normalizedUserPrompt);
+        }
+        if (!normalizedAssistantReply.isBlank()) {
+            memory.append("\nAssistant answered: ").append(normalizedAssistantReply);
+        }
+
+        transactionTemplate.executeWithoutResult(s -> {
+            Project managedProject = projectRepository.findById(chat.getProject().getId()).orElse(null);
+            if (managedProject == null) {
+                return;
+            }
+
+            ProjectMemoryEntry entry = ProjectMemoryEntry.builder()
+                    .project(managedProject)
+                    .content(memory.toString())
+                    .build();
+            projectMemoryEntryRepository.save(entry);
+        });
+    }
+
+    private String normalizeMemorySnippet(String content, int maxLength) {
+        if (content == null || content.isBlank()) {
+            return "";
+        }
+        String normalized = content.trim().replaceAll("\\s+", " ");
+        if (normalized.length() <= maxLength) {
+            return normalized;
+        }
+        return normalized.substring(0, maxLength) + "...";
     }
 
     private ProjectResponse toProjectResponse(Project project) {
