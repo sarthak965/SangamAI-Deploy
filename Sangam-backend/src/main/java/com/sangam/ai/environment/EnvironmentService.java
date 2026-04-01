@@ -223,9 +223,15 @@ public class EnvironmentService {
      * Returns all environments the current user belongs to.
      */
     public List<EnvironmentResponse> getMyEnvironments(User user) {
-        return memberRepository.findByUserId(user.getId())
+        List<UUID> visibleEnvironmentIds = memberRepository.findByUserId(user.getId())
                 .stream()
-                .map(m -> EnvironmentResponse.from(m.getEnvironment()))
+                .map(m -> m.getEnvironment().getId())
+                .distinct()
+                .toList();
+
+        return environmentRepository.findByIdInAndHiddenFalse(visibleEnvironmentIds)
+                .stream()
+                .map(EnvironmentResponse::from)
                 .toList();
     }
 

@@ -16,16 +16,82 @@ export interface CurrentUser {
   username: string;
   displayName: string;
   email: string;
+  hasAvatar: boolean;
+  appearancePreference: "LIGHT" | "DARK" | "SYSTEM";
+  updatedAt: string;
+}
+
+export interface ProfileUpdateResponse {
+  user: CurrentUser;
+  token: string;
+}
+
+export interface FriendUser {
+  id: string;
+  username: string;
+  displayName: string;
+  hasAvatar: boolean;
+  updatedAt: string;
+}
+
+export interface FriendRequestResponse {
+  id: string;
+  user: FriendUser;
+  direction: "INCOMING" | "OUTGOING";
+  status: "PENDING" | "ACCEPTED";
+  createdAt: string;
+}
+
+export interface FriendsOverviewResponse {
+  friends: FriendUser[];
+  incomingRequests: FriendRequestResponse[];
+  outgoingRequests: FriendRequestResponse[];
+}
+
+export interface UserProfileResponse {
+  id: string;
+  username: string;
+  displayName: string;
+  hasAvatar: boolean;
+  updatedAt: string;
+  friendshipStatus: "SELF" | "FRIENDS" | "OUTGOING_REQUEST" | "INCOMING_REQUEST" | "NONE";
 }
 
 export interface ProjectResponse {
   id: string;
   name: string;
   description: string | null;
+  type: "PERSONAL" | "GROUP";
   systemInstructions: string;
   knowledgeContext: string;
+  environmentId: string | null;
+  members: ProjectMemberResponse[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProjectMemberResponse {
+  userId: string;
+  username: string;
+  displayName: string;
+  hasAvatar: boolean;
+  updatedAt: string;
+  role: "OWNER" | "MEMBER";
+}
+
+export interface ProjectMemoryEntryResponse {
+  id: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface ProjectFileResponse {
+  id: string;
+  name: string;
+  contentType: string | null;
+  sizeBytes: number;
+  indexedForPrompt: boolean;
+  createdAt: string;
 }
 
 export interface SoloChatMessageResponse {

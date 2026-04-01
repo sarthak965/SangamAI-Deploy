@@ -7,14 +7,12 @@ import ChatOverflowMenu from "./ChatOverflowMenu";
 export default function AppShell({
   token,
   me,
-  onLogout,
   onWorkspaceChanged,
   recentChats,
   children,
 }: {
   token: string;
   me: CurrentUser;
-  onLogout: () => void;
   onWorkspaceChanged: () => Promise<void>;
   recentChats: SoloChatSummaryResponse[];
   children: ReactNode;
@@ -92,14 +90,6 @@ export default function AppShell({
 
           <nav className="workspace-nav">
             <NavLink
-              to="/app"
-              end
-              className={({ isActive }) => `workspace-nav-link ${isActive ? "active" : ""}`}
-            >
-              <span className="workspace-nav-icon">◎</span>
-              <span>Home</span>
-            </NavLink>
-            <NavLink
               to="/app/projects"
               className={({ isActive }) => `workspace-nav-link ${isActive ? "active" : ""}`}
             >
@@ -114,10 +104,17 @@ export default function AppShell({
               <span>History</span>
             </NavLink>
             <NavLink
+              to="/app/friends"
+              className={({ isActive }) => `workspace-nav-link ${isActive ? "active" : ""}`}
+            >
+              <span className="workspace-nav-icon">@</span>
+              <span>Friends</span>
+            </NavLink>
+            <NavLink
               to="/app/environments"
               className={({ isActive }) => `workspace-nav-link ${isActive ? "active" : ""}`}
             >
-              <span className="workspace-nav-icon">◫</span>
+              <span className="workspace-nav-icon">▭</span>
               <span>Environments</span>
             </NavLink>
           </nav>
@@ -166,24 +163,21 @@ export default function AppShell({
             className={({ isActive }) => `workspace-profile-chip ${isActive ? "active" : ""}`}
           >
             <div className="workspace-profile-avatar">
-              {me.displayName.charAt(0).toUpperCase()}
+              {me.hasAvatar ? (
+                <img
+                  src={api.getUserAvatarUrl(me.id, me.updatedAt)}
+                  alt={`${me.displayName} avatar`}
+                  className="workspace-profile-avatar-image"
+                />
+              ) : (
+                me.displayName.charAt(0).toUpperCase()
+              )}
             </div>
             <div className="workspace-profile-copy">
               <strong>{me.displayName}</strong>
               <span>{me.email}</span>
             </div>
           </NavLink>
-
-          <button
-            className="workspace-logout"
-            onClick={() => {
-              closeMobile();
-              onLogout();
-            }}
-            type="button"
-          >
-            Logout
-          </button>
         </div>
       </aside>
 

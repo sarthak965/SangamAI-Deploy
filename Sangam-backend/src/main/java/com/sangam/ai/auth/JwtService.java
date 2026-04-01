@@ -3,6 +3,7 @@ package com.sangam.ai.auth;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import com.sangam.ai.user.User;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
@@ -10,6 +11,7 @@ import org.springframework.stereotype.Service;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.UUID;
 import java.util.function.Function;
 
 @Service
@@ -38,8 +40,20 @@ public class JwtService {
      * issued this token and it hasn't been tampered with.
      */
     public String generateToken(UserDetails userDetails) {
+        if (userDetails instanceof User user) {
+            return generateToken(user);
+        }
         return Jwts.builder()
                 .subject(userDetails.getUsername())
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + expirationMs))
+                .signWith(getSigningKey())
+                .compact();
+    }
+
+    public String generateToken(User user) {
+        return Jwts.builder()
+                .subject(user.getId().toString())
                 .issuedAt(new Date())
                 .expiration(new Date(System.currentTimeMillis() + expirationMs))
                 .signWith(getSigningKey())
@@ -51,10 +65,21 @@ public class JwtService {
         return extractClaim(token, Claims::getSubject);
     }
 
+    public UUID extractUserId(String token) {
+        return UUID.fromString(extractClaim(token, Claims::getSubject));
+    }
+
     // Checks that the token belongs to this user AND hasn't expired
     public boolean isTokenValid(String token, UserDetails userDetails) {
-        final String username = extractUsername(token);
-        return username.equals(userDetails.getUsername()) && !isTokenExpired(token);
+        if (userDetails instanceof User user) {
+            try {
+                return user.getId().equals(extractUserId(token)) && !isTokenExpired(token);
+            } catch (Exception ignored) {
+                return user.getUsername().equals(extractUsername(token)) && !isTokenExpired(token);
+            }
+        }
+        final String subject = extractUsername(token);
+        return subject.equals(userDetails.getUsername()) && !isTokenExpired(token);
     }
 
     private boolean isTokenExpired(String token) {

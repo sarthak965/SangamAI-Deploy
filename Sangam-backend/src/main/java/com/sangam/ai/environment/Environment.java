@@ -42,6 +42,10 @@ public class Environment {
     @Column(nullable = false, unique = true, length = 20)
     private String inviteCode;
 
+    @Builder.Default
+    @Column(nullable = false)
+    private boolean hidden = false;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 

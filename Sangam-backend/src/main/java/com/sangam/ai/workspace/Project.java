@@ -24,6 +24,15 @@ public class Project {
     @JoinColumn(name = "owner_id", nullable = false)
     private User owner;
 
+    @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(name = "project_type", nullable = false, length = 20)
+    private Type type = Type.PERSONAL;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "environment_id")
+    private com.sangam.ai.environment.Environment environment;
+
     @Column(nullable = false)
     private String name;
 
@@ -53,5 +62,10 @@ public class Project {
     @PreUpdate
     protected void onUpdate() {
         updatedAt = Instant.now();
+    }
+
+    public enum Type {
+        PERSONAL,
+        GROUP
     }
 }

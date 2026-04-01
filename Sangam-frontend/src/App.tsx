@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api } from "./lib/api";
 import { realtimeManager } from "./lib/realtime";
+import { applyThemePreference } from "./lib/theme";
 import type { AuthResponse, CurrentUser } from "./types";
 import type { SoloChatSummaryResponse } from "./types";
 
@@ -9,6 +10,7 @@ const LandingPage = lazy(() => import("./pages/LandingPage"));
 const AuthPage = lazy(() => import("./pages/AuthPage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 const FriendsPage = lazy(() => import("./pages/FriendsPage"));
+const FriendProfilePage = lazy(() => import("./pages/FriendProfilePage"));
 const EnvironmentsPage = lazy(() => import("./pages/EnvironmentsPage"));
 const EnvironmentPage = lazy(() => import("./pages/EnvironmentPage"));
 const SessionPage = lazy(() => import("./pages/SessionPage"));
@@ -89,6 +91,11 @@ function App() {
     });
   }, [token, me]);
 
+  useEffect(() => {
+    if (!me) return;
+    applyThemePreference(me.appearancePreference.toLowerCase() as "light" | "dark" | "system");
+  }, [me]);
+
   return (
     <Suspense fallback={<RouteLoadingScreen />}>
       <Routes>
@@ -126,7 +133,6 @@ function App() {
               <AppShell
                 token={token}
                 me={me}
-                onLogout={handleLogout}
                 onWorkspaceChanged={refreshWorkspaceData}
                 recentChats={soloRecentChats}
               >
@@ -169,8 +175,28 @@ function App() {
                       />
                     }
                   />
-                  <Route path="profile" element={<ProfilePage me={me} />} />
-                  <Route path="friends" element={<FriendsPage />} />
+                  <Route
+                    path="profile"
+                    element={
+                      <ProfilePage
+                        token={token}
+                        me={me}
+                        onLogout={handleLogout}
+                        onProfileUpdated={(user, nextToken) => {
+                          setMe(user);
+                          if (nextToken) {
+                            localStorage.setItem(TOKEN_STORAGE_KEY, nextToken);
+                            setToken(nextToken);
+                          }
+                        }}
+                      />
+                    }
+                  />
+                  <Route path="friends" element={<FriendsPage token={token} me={me} />} />
+                  <Route
+                    path="friends/:username"
+                    element={<FriendProfilePage token={token} me={me} />}
+                  />
                   <Route path="environments" element={<EnvironmentsPage token={token} />} />
                   <Route
                     path="environments/:environmentId"

@@ -4,12 +4,20 @@ import type {
   CentrifugoConnectionToken,
   CurrentUser,
   EnvironmentResponse,
+  FriendRequestResponse,
+  FriendsOverviewResponse,
+  FriendUser,
   MemberResponse,
+  ProjectFileResponse,
+  ProjectMemoryEntryResponse,
+  ProjectMemberResponse,
+  ProfileUpdateResponse,
   ProjectResponse,
   SessionListItem,
   SessionSnapshotDto,
   SoloChatDetailResponse,
   SoloChatSummaryResponse,
+  UserProfileResponse,
 } from "../types";
 
 const API_BASE_URL =
@@ -23,7 +31,10 @@ async function request<T>(
   const headers = new Headers(options.headers ?? {});
 
   if (!headers.has("Content-Type") && options.body) {
-    headers.set("Content-Type", "application/json");
+    const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+    if (!isFormData) {
+      headers.set("Content-Type", "application/json");
+    }
   }
 
   if (token) {
@@ -46,6 +57,11 @@ async function request<T>(
 
 export const api = {
   baseUrl: API_BASE_URL,
+
+  getUserAvatarUrl(userId: string, updatedAt?: string) {
+    const version = updatedAt ? `?v=${encodeURIComponent(updatedAt)}` : "";
+    return `${API_BASE_URL}/api/users/${userId}/avatar${version}`;
+  },
 
   register(body: {
     username: string;
@@ -70,6 +86,76 @@ export const api = {
     return request<CurrentUser>("/api/users/me", {}, token);
   },
 
+  updateDisplayName(token: string, displayName: string) {
+    return request<CurrentUser>(
+      "/api/users/me/display-name",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ displayName }),
+      },
+      token,
+    );
+  },
+
+  updateUsername(token: string, username: string) {
+    return request<ProfileUpdateResponse>(
+      "/api/users/me/username",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ username }),
+      },
+      token,
+    );
+  },
+
+  updateAppearancePreference(
+    token: string,
+    appearancePreference: "LIGHT" | "DARK" | "SYSTEM",
+  ) {
+    return request<CurrentUser>(
+      "/api/users/me/appearance",
+      {
+        method: "PATCH",
+        body: JSON.stringify({ appearancePreference }),
+      },
+      token,
+    );
+  },
+
+  uploadAvatar(token: string, avatar: File) {
+    const formData = new FormData();
+    formData.append("avatar", avatar);
+    return request<CurrentUser>(
+      "/api/users/me/avatar",
+      {
+        method: "POST",
+        body: formData,
+      },
+      token,
+    );
+  },
+
+  removeAvatar(token: string) {
+    return request<CurrentUser>(
+      "/api/users/me/avatar",
+      {
+        method: "DELETE",
+      },
+      token,
+    );
+  },
+
+  deleteAccount(token: string, confirmationText: string) {
+    return request<null>(
+      "/api/users/me",
+      {
+        method: "DELETE",
+        body: JSON.stringify({ confirmationText }),
+      },
+      token,
+    );
+  },
+
   listProjects(token: string) {
     return request<ProjectResponse[]>("/api/workspace/projects", {}, token);
   },
@@ -79,8 +165,10 @@ export const api = {
     body: {
       name: string;
       description: string;
+      type?: "PERSONAL" | "GROUP";
       systemInstructions: string;
       knowledgeContext: string;
+      memberUsernames?: string[];
     },
   ) {
     return request<ProjectResponse>(
@@ -99,8 +187,10 @@ export const api = {
     body: {
       name: string;
       description: string;
+      type?: "PERSONAL" | "GROUP";
       systemInstructions: string;
       knowledgeContext: string;
+      memberUsernames?: string[];
     },
   ) {
     return request<ProjectResponse>(
@@ -108,6 +198,74 @@ export const api = {
       {
         method: "PUT",
         body: JSON.stringify(body),
+      },
+      token,
+    );
+  },
+
+  deleteProject(token: string, projectId: string) {
+    return request<null>(
+      `/api/workspace/projects/${projectId}`,
+      {
+        method: "DELETE",
+      },
+      token,
+    );
+  },
+
+  listProjectMemoryEntries(token: string, projectId: string) {
+    return request<ProjectMemoryEntryResponse[]>(
+      `/api/workspace/projects/${projectId}/memory`,
+      {},
+      token,
+    );
+  },
+
+  listProjectMembers(token: string, projectId: string) {
+    return request<ProjectMemberResponse[]>(
+      `/api/workspace/projects/${projectId}/members`,
+      {},
+      token,
+    );
+  },
+
+  addProjectMemoryEntry(token: string, projectId: string, content: string) {
+    return request<ProjectMemoryEntryResponse>(
+      `/api/workspace/projects/${projectId}/memory`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      },
+      token,
+    );
+  },
+
+  listProjectFiles(token: string, projectId: string) {
+    return request<ProjectFileResponse[]>(
+      `/api/workspace/projects/${projectId}/files`,
+      {},
+      token,
+    );
+  },
+
+  uploadProjectFiles(token: string, projectId: string, files: File[]) {
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file));
+    return request<ProjectFileResponse[]>(
+      `/api/workspace/projects/${projectId}/files`,
+      {
+        method: "POST",
+        body: formData,
+      },
+      token,
+    );
+  },
+
+  deleteProjectFile(token: string, projectId: string, fileId: string) {
+    return request<null>(
+      `/api/workspace/projects/${projectId}/files/${fileId}`,
+      {
+        method: "DELETE",
       },
       token,
     );
@@ -185,6 +343,61 @@ export const api = {
 
   listEnvironments(token: string) {
     return request<EnvironmentResponse[]>("/api/environments", {}, token);
+  },
+
+  getFriendsOverview(token: string) {
+    return request<FriendsOverviewResponse>("/api/friends", {}, token);
+  },
+
+  searchFriends(token: string, query: string) {
+    return request<FriendUser[]>(
+      `/api/friends/search?query=${encodeURIComponent(query)}`,
+      {},
+      token,
+    );
+  },
+
+  sendFriendRequest(token: string, username: string) {
+    return request<FriendRequestResponse>(
+      "/api/friends/requests",
+      {
+        method: "POST",
+        body: JSON.stringify({ username }),
+      },
+      token,
+    );
+  },
+
+  acceptFriendRequest(token: string, requestId: string) {
+    return request<FriendUser>(`/api/friends/requests/${requestId}/accept`, { method: "POST" }, token);
+  },
+
+  removeFriendRequest(token: string, requestId: string, direction: "incoming" | "outgoing") {
+    return request<null>(
+      `/api/friends/requests/${requestId}?direction=${direction}`,
+      { method: "DELETE" },
+      token,
+    );
+  },
+
+  removeFriend(token: string, userId: string) {
+    return request<null>(`/api/friends/${userId}`, { method: "DELETE" }, token);
+  },
+
+  getUserProfile(token: string, username: string) {
+    return request<UserProfileResponse>(
+      `/api/users/username/${encodeURIComponent(username)}/profile`,
+      {},
+      token,
+    );
+  },
+
+  searchUsers(token: string, query: string, excludeFriends = false) {
+    return request<FriendUser[]>(
+      `/api/users/search?query=${encodeURIComponent(query)}&excludeFriends=${excludeFriends}`,
+      {},
+      token,
+    );
   },
 
   createEnvironment(

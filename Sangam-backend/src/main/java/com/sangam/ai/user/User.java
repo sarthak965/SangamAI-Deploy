@@ -36,6 +36,14 @@ public class User implements UserDetails {
     @Column(nullable = false, length = 100)
     private String displayName;
 
+    @Column(name = "avatar_path", length = 1024)
+    private String avatarPath;
+
+    @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(name = "appearance_preference", nullable = false, length = 20)
+    private AppearancePreference appearancePreference = AppearancePreference.SYSTEM;
+
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -76,4 +84,10 @@ public class User implements UserDetails {
     @Override public boolean isAccountNonLocked()     { return true; }
     @Override public boolean isCredentialsNonExpired(){ return true; }
     @Override public boolean isEnabled()              { return true; }
+
+    public enum AppearancePreference {
+        LIGHT,
+        DARK,
+        SYSTEM
+    }
 }

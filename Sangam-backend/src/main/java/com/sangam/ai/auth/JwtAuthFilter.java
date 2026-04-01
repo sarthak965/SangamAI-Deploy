@@ -53,14 +53,10 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         final String jwt = authHeader.substring(7);
 
         try {
-            final String username = jwtService.extractUsername(jwt);
-
-            // Only proceed if we got a username AND the request isn't
+            // Only proceed if we got a valid token subject AND the request isn't
             // already authenticated (to avoid doing this work twice).
-            if (username != null &&
-                    SecurityContextHolder.getContext().getAuthentication() == null) {
-
-                var user = userRepository.findByUsername(username).orElse(null);
+            if (SecurityContextHolder.getContext().getAuthentication() == null) {
+                var user = resolveUser(jwt);
 
                 if (user != null && jwtService.isTokenValid(jwt, user)) {
                     // This is how you tell Spring Security "this request
@@ -85,5 +81,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private com.sangam.ai.user.User resolveUser(String jwt) {
+        try {
+            return userRepository.findById(jwtService.extractUserId(jwt)).orElse(null);
+        } catch (Exception ignored) {
+            String username = jwtService.extractUsername(jwt);
+            return userRepository.findByUsername(username).orElse(null);
+        }
     }
 }

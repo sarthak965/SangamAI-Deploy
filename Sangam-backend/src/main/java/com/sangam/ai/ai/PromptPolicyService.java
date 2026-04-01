@@ -14,7 +14,7 @@ public class PromptPolicyService {
         this.intentClassifier = intentClassifier;
     }
 
-    public String buildPersonalSystemPrompt(Project project, String userMessage) {
+    public String buildPersonalSystemPrompt(Project project, String projectKnowledgeContext, String userMessage) {
         PromptIntent intent = intentClassifier.classify(userMessage);
 
         StringBuilder prompt = new StringBuilder("""
@@ -38,8 +38,8 @@ public class PromptPolicyService {
             if (hasText(project.getSystemInstructions())) {
                 prompt.append("\nProject instructions:\n").append(project.getSystemInstructions().trim());
             }
-            if (hasText(project.getKnowledgeContext())) {
-                prompt.append("\nProject knowledge:\n").append(project.getKnowledgeContext().trim());
+            if (hasText(projectKnowledgeContext)) {
+                prompt.append("\nProject knowledge:\n").append(projectKnowledgeContext.trim());
             }
         }
 

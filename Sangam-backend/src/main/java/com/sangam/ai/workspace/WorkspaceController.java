@@ -6,9 +6,11 @@ import com.sangam.ai.workspace.dto.*;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 import java.util.UUID;
@@ -45,6 +47,80 @@ public class WorkspaceController {
         return ResponseEntity.ok(ApiResponse.ok(
                 workspaceService.updateProject(projectId, request, currentUser)
         ));
+    }
+
+    @DeleteMapping("/projects/{projectId}")
+    public ResponseEntity<ApiResponse<Void>> deleteProject(
+            @PathVariable UUID projectId,
+            @AuthenticationPrincipal User currentUser
+    ) {
+        workspaceService.removeProject(projectId, currentUser);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    @GetMapping("/projects/{projectId}/memory")
+    public ResponseEntity<ApiResponse<List<ProjectMemoryEntryResponse>>> listProjectMemory(
+            @PathVariable UUID projectId,
+            @AuthenticationPrincipal User currentUser
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                workspaceService.listProjectMemoryEntries(projectId, currentUser)
+        ));
+    }
+
+    @GetMapping("/projects/{projectId}/members")
+    public ResponseEntity<ApiResponse<List<ProjectMemberResponse>>> listProjectMembers(
+            @PathVariable UUID projectId,
+            @AuthenticationPrincipal User currentUser
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                workspaceService.listProjectMembers(projectId, currentUser)
+        ));
+    }
+
+    @PostMapping("/projects/{projectId}/memory")
+    public ResponseEntity<ApiResponse<ProjectMemoryEntryResponse>> addProjectMemory(
+            @PathVariable UUID projectId,
+            @Valid @RequestBody ProjectMemoryEntryRequest request,
+            @AuthenticationPrincipal User currentUser
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(
+                workspaceService.addProjectMemoryEntry(projectId, request, currentUser)
+        ));
+    }
+
+    @GetMapping("/projects/{projectId}/files")
+    public ResponseEntity<ApiResponse<List<ProjectFileResponse>>> listProjectFiles(
+            @PathVariable UUID projectId,
+            @AuthenticationPrincipal User currentUser
+    ) {
+        return ResponseEntity.ok(ApiResponse.ok(
+                workspaceService.listProjectFiles(projectId, currentUser)
+        ));
+    }
+
+    @PostMapping(
+            value = "/projects/{projectId}/files",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE
+    )
+    public ResponseEntity<ApiResponse<List<ProjectFileResponse>>> uploadProjectFiles(
+            @PathVariable UUID projectId,
+            @RequestPart("files") List<MultipartFile> files,
+            @AuthenticationPrincipal User currentUser
+    ) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.ok(
+                workspaceService.uploadProjectFiles(projectId, files, currentUser)
+        ));
+    }
+
+    @DeleteMapping("/projects/{projectId}/files/{fileId}")
+    public ResponseEntity<ApiResponse<Void>> deleteProjectFile(
+            @PathVariable UUID projectId,
+            @PathVariable UUID fileId,
+            @AuthenticationPrincipal User currentUser
+    ) {
+        workspaceService.removeProjectFile(projectId, fileId, currentUser);
+        return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
     @GetMapping("/chats")

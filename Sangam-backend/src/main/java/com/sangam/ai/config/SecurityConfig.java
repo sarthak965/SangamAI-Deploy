@@ -49,6 +49,7 @@ public class SecurityConfig {
                         // Anyone can hit the auth endpoints — obviously, since
                         // you need to register/login before you have a token.
                         .requestMatchers("/api/auth/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/users/*/avatar").permitAll()
                         // Every other endpoint requires a valid JWT.
                         .anyRequest().authenticated()
                 )

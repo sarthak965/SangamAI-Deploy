@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -35,6 +35,14 @@ export default function WorkspaceChatPage({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const shouldStickToBottomRef = useRef(true);
+  const pendingComposerScrollRef = useRef(false);
+
+  const isStreaming = useMemo(
+    () => chat?.messages.some((message) => message.status === "STREAMING") ?? false,
+    [chat?.messages],
+  );
 
   const loadChat = async () => {
     if (!chatId) return;
@@ -72,17 +80,23 @@ export default function WorkspaceChatPage({
     };
   }, [chatId, token]);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const updateStickiness = () => {
+      const distanceFromBottom =
+        document.documentElement.scrollHeight - window.innerHeight - window.scrollY;
+      shouldStickToBottomRef.current = distanceFromBottom < 180;
+    };
+
+    updateStickiness();
+    window.addEventListener("scroll", updateStickiness, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", updateStickiness);
+    };
+  }, []);
 
   useEffect(() => {
-    const isStreaming = chat?.messages.some((m) => m.status === "STREAMING");
-    if (isStreaming) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }
-  }, [chat?.messages]);
-
-  useEffect(() => {
-    if (!chatId || !chat?.messages.some((message) => message.status === "STREAMING")) {
+    if (!chatId || !isStreaming) {
       return;
     }
 
@@ -108,7 +122,29 @@ export default function WorkspaceChatPage({
       active = false;
       window.clearInterval(interval);
     };
-  }, [chatId, chat?.messages, token]);
+  }, [chatId, isStreaming, token]);
+
+  useEffect(() => {
+    if (!chat?.messages.length) {
+      return;
+    }
+
+    if (!pendingComposerScrollRef.current && !shouldStickToBottomRef.current) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: pendingComposerScrollRef.current ? "smooth" : "auto",
+        block: "end",
+      });
+      pendingComposerScrollRef.current = false;
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [chat?.messages]);
 
   useEffect(() => {
     autoSizeTextarea(textareaRef.current, 48, 120);
@@ -119,6 +155,7 @@ export default function WorkspaceChatPage({
     setBusy(true);
     setError(null);
     try {
+      pendingComposerScrollRef.current = true;
       const updated = await api.sendSoloMessage(token, chatId, draft.trim());
       setChat((prevChat) => mergeChatDetail(prevChat, updated));
       setDraft("");
@@ -200,6 +237,43 @@ export default function WorkspaceChatPage({
 function WorkspaceMessage({ message }: { message: SoloChatMessageResponse }) {
   const isAssistant = message.role === "ASSISTANT";
   const isStreaming = message.status === "STREAMING";
+  const [visibleContent, setVisibleContent] = useState(
+    isAssistant && isStreaming ? "" : message.content,
+  );
+
+  useEffect(() => {
+    if (!isAssistant) {
+      setVisibleContent(message.content);
+      return;
+    }
+
+    if (!isStreaming) {
+      setVisibleContent(message.content);
+      return;
+    }
+
+    let frameId = 0;
+
+    const reveal = () => {
+      setVisibleContent((current) => {
+        if (current.length >= message.content.length) {
+          return current;
+        }
+
+        const remaining = message.content.length - current.length;
+        const step = Math.max(6, Math.min(28, Math.ceil(remaining / 6)));
+        return message.content.slice(0, current.length + step);
+      });
+
+      frameId = window.requestAnimationFrame(reveal);
+    };
+
+    frameId = window.requestAnimationFrame(reveal);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [isAssistant, isStreaming, message.content, message.id]);
 
   return (
     <div className={`chat-message ${isAssistant ? "assistant-turn" : "user-turn"}`}>
@@ -211,14 +285,14 @@ function WorkspaceMessage({ message }: { message: SoloChatMessageResponse }) {
       </div>
       {isAssistant ? (
         <div className="ai-response">
-          {message.content === "" && isStreaming ? (
+          {visibleContent === "" && isStreaming ? (
             <div className="streaming-indicator">
               <span className="dot" />
               <span className="dot" />
               <span className="dot" />
             </div>
           ) : (
-            <MarkdownBlock content={message.content} />
+            <MarkdownBlock content={visibleContent} />
           )}
         </div>
       ) : (
@@ -291,18 +365,12 @@ function mergeChatDetail(
     };
   });
 
+  const mergedMessageIds = new Set(mergedMessages.map((message) => message.id));
   for (const previous of prevChat.messages) {
-    if (!mergedMessages.some((message) => message.id === previous.id)) {
+    if (!mergedMessageIds.has(previous.id)) {
       mergedMessages.push(previous);
     }
   }
-
-  mergedMessages.sort((a, b) => {
-    const timeDiff =
-      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
-    if (timeDiff !== 0) return timeDiff;
-    return a.id.localeCompare(b.id);
-  });
 
   return {
     ...incoming,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import type { CurrentUser, ProjectResponse, SoloChatSummaryResponse } from "../types";
@@ -20,11 +20,6 @@ export default function HomePage({
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const greeting = useMemo(() => {
-    const firstName = me.displayName.trim().split(/\s+/)[0];
-    return firstName || me.username;
-  }, [me.displayName, me.username]);
 
   useEffect(() => {
     api
@@ -101,9 +96,8 @@ export default function HomePage({
 
         <div className="solo-suggestions">
           {[
-            "Summarize a system design interview topic",
-            "Plan my week in focused work blocks",
-            "Explain a tricky DP problem in Java",
+            "Summarize a system design topic",
+            "Plan my week in focused blocks",
             "Draft a clean project brief for my team",
           ].map((prompt) => (
             <button

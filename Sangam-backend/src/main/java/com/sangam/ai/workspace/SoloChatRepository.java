@@ -10,4 +10,5 @@ import java.util.UUID;
 public interface SoloChatRepository extends JpaRepository<SoloChat, UUID> {
     List<SoloChat> findByOwnerOrderByPinnedDescUpdatedAtDesc(User owner);
     Optional<SoloChat> findByIdAndOwner(UUID id, User owner);
+    List<SoloChat> findByProject(Project project);
 }
