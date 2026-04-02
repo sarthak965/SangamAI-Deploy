@@ -33,7 +33,7 @@ cat > /tmp/config.json <<EOF
   "token_hmac_secret_key": "${CENTRIFUGO_TOKEN_SECRET}",
   "api_key": "${CENTRIFUGO_API_KEY}",
   "allowed_origins": ${ORIGINS_JSON},
-  "health": true
+  "health": {}
 }
 EOF
 
