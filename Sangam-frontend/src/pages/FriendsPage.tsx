@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import Modal from "../components/Modal";
@@ -24,14 +24,16 @@ export default function FriendsPage({
   me: CurrentUser;
 }) {
   const navigate = useNavigate();
+  const addInputRef = useRef<HTMLInputElement>(null);
   const [overview, setOverview] = useState<FriendsOverviewResponse | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("requests");
   const [addUsername, setAddUsername] = useState("");
   const [friendSearch, setFriendSearch] = useState("");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [confirmState, setConfirmState] = useState<ConfirmState>(null);
+  const [removingIds, setRemovingIds] = useState<Set<string>>(new Set());
 
   const loadOverview = async () => {
     const data = await api.getFriendsOverview(token);
@@ -45,7 +47,7 @@ export default function FriendsPage({
   const withBusy = async (key: string, action: () => Promise<void>) => {
     setBusyKey(key);
     setError(null);
-    setNotice(null);
+    setToast(null);
     try {
       await action();
     } catch (err) {
@@ -65,176 +67,161 @@ export default function FriendsPage({
 
   const pendingCount = overview?.incomingRequests.length ?? 0;
 
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = window.setTimeout(() => setToast(null), 2200);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
   return (
     <div className="friends-page">
       <section className="friends-hero">
-        <div>
+        <div className="friends-hero-copy">
           <h1>Friends</h1>
-          <p>Send requests, review notifications, and keep a clean list of the people you know on SangamAI.</p>
+          <p>Build your inner circle and collaborate in real time.</p>
         </div>
-
-        <div className="friends-add-card">
-          <strong>Add a friend</strong>
-          <form
-            className="friends-add-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!addUsername.trim()) return;
-              void withBusy("send-request", async () => {
-                await api.sendFriendRequest(token, addUsername.trim());
-                setAddUsername("");
-                await loadOverview();
-                setActiveTab("requests");
-                setNotice("Friend request sent.");
-              });
-            }}
-          >
-            <input
-              value={addUsername}
-              onChange={(event) => setAddUsername(event.target.value)}
-              placeholder="Enter a username"
-            />
-            <button className="btn btn-primary" type="submit" disabled={busyKey === "send-request"}>
-              {busyKey === "send-request" ? "Sending..." : "Send request"}
-            </button>
-          </form>
-        </div>
+        <AddFriendCard
+          value={addUsername}
+          onChange={setAddUsername}
+          inputRef={addInputRef}
+          busy={busyKey === "send-request"}
+          onSubmit={() => {
+            if (!addUsername.trim()) return;
+            void withBusy("send-request", async () => {
+              await api.sendFriendRequest(token, addUsername.trim());
+              setAddUsername("");
+              await loadOverview();
+              setActiveTab("requests");
+              setToast("Request sent");
+            });
+          }}
+        />
       </section>
 
-      {error && <div className="error-banner">{error}</div>}
-      {notice && <div className="profile-notice">{notice}</div>}
+      {error && <div className="friends-error-banner">{error}</div>}
+      {toast && <div className="friends-toast">{toast}</div>}
 
       <section className="friends-panel">
-        <div className="friends-tab-row">
-          <button
-            type="button"
-            className={`friends-tab ${activeTab === "requests" ? "active" : ""}`}
-            onClick={() => setActiveTab("requests")}
-          >
-            Request notifications
-            {pendingCount > 0 && <span className="friends-badge">{pendingCount}</span>}
-          </button>
-          <button
-            type="button"
-            className={`friends-tab ${activeTab === "friends" ? "active" : ""}`}
-            onClick={() => setActiveTab("friends")}
-          >
-            Your friends
-            <span className="friends-badge muted">{overview?.friends.length ?? 0}</span>
-          </button>
+        <Tabs
+          active={activeTab}
+          pendingCount={pendingCount}
+          friendCount={overview?.friends.length ?? 0}
+          onChange={setActiveTab}
+        />
+
+        <div className={`friends-tab-panel ${activeTab}`}>
+          {activeTab === "requests" ? (
+            <div className="friends-requests-grid">
+              <div className="friends-column">
+                <div className="friends-column-head">
+                  <h2>Incoming</h2>
+                  <span>{overview?.incomingRequests.length ?? 0}</span>
+                </div>
+                {overview?.incomingRequests.length ? (
+                  overview.incomingRequests.map((request) => (
+                    <RequestCard
+                      key={request.id}
+                      request={request}
+                      actionLabel={busyKey === `accept-${request.id}` ? "Accepting..." : "Accept"}
+                      secondaryLabel="Decline"
+                      removing={removingIds.has(request.id)}
+                      onPrimary={() => {
+                        setRemovingIds((prev) => new Set(prev).add(request.id));
+                        void withBusy(`accept-${request.id}`, async () => {
+                          try {
+                            await api.acceptFriendRequest(token, request.id);
+                            await loadOverview();
+                            setToast(`You and @${request.user.username} are now friends.`);
+                          } finally {
+                            setRemovingIds((prev) => {
+                              const next = new Set(prev);
+                              next.delete(request.id);
+                              return next;
+                            });
+                          }
+                        });
+                      }}
+                      onSecondary={() => setConfirmState({ type: "decline-request", request })}
+                      onViewProfile={() => navigate(`/app/friends/${request.user.username}`)}
+                    />
+                  ))
+                ) : (
+                  <EmptyState
+                    title="No incoming requests"
+                    body="When someone adds you, their request will land here."
+                    onCta={() => addInputRef.current?.focus()}
+                  />
+                )}
+              </div>
+
+              <div className="friends-column">
+                <div className="friends-column-head">
+                  <h2>Sent</h2>
+                  <span>{overview?.outgoingRequests.length ?? 0}</span>
+                </div>
+                {overview?.outgoingRequests.length ? (
+                  overview.outgoingRequests.map((request) => (
+                    <RequestCard
+                      key={request.id}
+                      request={request}
+                      actionLabel="Pending"
+                      secondaryLabel="Cancel"
+                      disablePrimary
+                      removing={removingIds.has(request.id)}
+                      onPrimary={() => undefined}
+                      onSecondary={() => setConfirmState({ type: "cancel-request", request })}
+                      onViewProfile={() => navigate(`/app/friends/${request.user.username}`)}
+                    />
+                  ))
+                ) : (
+                  <EmptyState
+                    title="No sent requests"
+                    body="Requests you send will appear here until accepted."
+                    onCta={() => addInputRef.current?.focus()}
+                  />
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="friends-list-panel">
+              <div className="friends-list-head">
+                <div>
+                  <h2>Your friends</h2>
+                  <p>{overview?.friends.length ?? 0} people in your network.</p>
+                </div>
+                <input
+                  value={friendSearch}
+                  onChange={(event) => setFriendSearch(event.target.value)}
+                  className="friends-search"
+                  placeholder="Search friends"
+                />
+              </div>
+
+              {filteredFriends.length ? (
+                <div className="friends-list">
+                  {filteredFriends.map((friend) => (
+                    <FriendCard
+                      key={friend.id}
+                      friend={friend}
+                      onProfile={() => navigate(`/app/friends/${friend.username}`)}
+                      onRemove={() => setConfirmState({ type: "remove-friend", friend })}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title={overview?.friends.length ? "No matches" : "No friends yet"}
+                  body={
+                    overview?.friends.length
+                      ? "Try another name or username."
+                      : "Start by adding people you know."
+                  }
+                  onCta={() => addInputRef.current?.focus()}
+                />
+              )}
+            </div>
+          )}
         </div>
-
-        {activeTab === "requests" ? (
-          <div className="friends-grid">
-            <div className="friends-column">
-              <div className="friends-column-head">
-                <h2>Incoming requests</h2>
-                <span>{overview?.incomingRequests.length ?? 0}</span>
-              </div>
-              {overview?.incomingRequests.length ? (
-                overview.incomingRequests.map((request) => (
-                  <RequestCard
-                    key={request.id}
-                    request={request}
-                    actionLabel={busyKey === `accept-${request.id}` ? "Accepting..." : "Accept"}
-                    secondaryLabel="Decline"
-                    onPrimary={() =>
-                      void withBusy(`accept-${request.id}`, async () => {
-                        await api.acceptFriendRequest(token, request.id);
-                        await loadOverview();
-                        setNotice(`You and @${request.user.username} are now friends.`);
-                      })
-                    }
-                    onSecondary={() => setConfirmState({ type: "decline-request", request })}
-                    onViewProfile={() => navigate(`/app/friends/${request.user.username}`)}
-                  />
-                ))
-              ) : (
-                <EmptyPanel
-                  title="No incoming requests"
-                  body="When someone adds you, their request will appear here."
-                />
-              )}
-            </div>
-
-            <div className="friends-column">
-              <div className="friends-column-head">
-                <h2>Sent requests</h2>
-                <span>{overview?.outgoingRequests.length ?? 0}</span>
-              </div>
-              {overview?.outgoingRequests.length ? (
-                overview.outgoingRequests.map((request) => (
-                  <RequestCard
-                    key={request.id}
-                    request={request}
-                    actionLabel="Pending"
-                    secondaryLabel="Cancel"
-                    disablePrimary
-                    onPrimary={() => undefined}
-                    onSecondary={() => setConfirmState({ type: "cancel-request", request })}
-                    onViewProfile={() => navigate(`/app/friends/${request.user.username}`)}
-                  />
-                ))
-              ) : (
-                <EmptyPanel
-                  title="No sent requests"
-                  body="Requests you send will stay here until the other person accepts them."
-                />
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="friends-list-panel">
-            <div className="friends-list-head">
-              <div>
-                <h2>Your friends</h2>
-                <p>{overview?.friends.length ?? 0} people in your network.</p>
-              </div>
-              <input
-                value={friendSearch}
-                onChange={(event) => setFriendSearch(event.target.value)}
-                className="friends-search"
-                placeholder="Search friends"
-              />
-            </div>
-
-            {filteredFriends.length ? (
-              <div className="friends-list">
-                {filteredFriends.map((friend) => (
-                  <div key={friend.id} className="friend-row">
-                    <button
-                      type="button"
-                      className="friend-row-main"
-                      onClick={() => navigate(`/app/friends/${friend.username}`)}
-                    >
-                      <Avatar user={friend} />
-                      <div className="friend-row-copy">
-                        <strong>{friend.displayName}</strong>
-                        <span>@{friend.username}</span>
-                      </div>
-                    </button>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      type="button"
-                      onClick={() => setConfirmState({ type: "remove-friend", friend })}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <EmptyPanel
-                title={overview?.friends.length ? "No matches" : "No friends yet"}
-                body={
-                  overview?.friends.length
-                    ? "Try another name or username."
-                    : "Once requests are accepted, your friends list will appear here."
-                }
-              />
-            )}
-          </div>
-        )}
       </section>
 
       {confirmState && (
@@ -267,31 +254,123 @@ export default function FriendsPage({
                 await api.removeFriend(token, confirmState.friend.id);
                 setConfirmState(null);
                 await loadOverview();
-                setNotice(`Removed @${confirmState.friend.username}.`);
+                setToast(`Removed @${confirmState.friend.username}.`);
               });
               return;
             }
 
             if (confirmState.type === "decline-request") {
+              setRemovingIds((prev) => new Set(prev).add(confirmState.request.id));
               void withBusy(`decline-${confirmState.request.id}`, async () => {
-                await api.removeFriendRequest(token, confirmState.request.id, "incoming");
-                setConfirmState(null);
-                await loadOverview();
-                setNotice(`Declined @${confirmState.request.user.username}.`);
+                try {
+                  await api.removeFriendRequest(token, confirmState.request.id, "incoming");
+                  setConfirmState(null);
+                  await loadOverview();
+                  setToast(`Declined @${confirmState.request.user.username}.`);
+                } finally {
+                  setRemovingIds((prev) => {
+                    const next = new Set(prev);
+                    next.delete(confirmState.request.id);
+                    return next;
+                  });
+                }
               });
               return;
             }
 
+            setRemovingIds((prev) => new Set(prev).add(confirmState.request.id));
             void withBusy(`cancel-${confirmState.request.id}`, async () => {
-              await api.removeFriendRequest(token, confirmState.request.id, "outgoing");
-              setConfirmState(null);
-              await loadOverview();
-              setNotice(`Cancelled request to @${confirmState.request.user.username}.`);
+              try {
+                await api.removeFriendRequest(token, confirmState.request.id, "outgoing");
+                setConfirmState(null);
+                await loadOverview();
+                setToast(`Cancelled request to @${confirmState.request.user.username}.`);
+              } finally {
+                setRemovingIds((prev) => {
+                  const next = new Set(prev);
+                  next.delete(confirmState.request.id);
+                  return next;
+                });
+              }
             });
           }}
           danger={confirmState.type !== "cancel-request"}
         />
       )}
+    </div>
+  );
+}
+
+function AddFriendCard({
+  value,
+  onChange,
+  onSubmit,
+  inputRef,
+  busy,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  inputRef: React.RefObject<HTMLInputElement>;
+  busy: boolean;
+}) {
+  return (
+    <div className="friends-add-card">
+      <div>
+        <strong>Add a friend</strong>
+        <p>Send a request to someone you know.</p>
+      </div>
+      <form
+        className="friends-add-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSubmit();
+        }}
+      >
+        <input
+          ref={inputRef}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Enter a username"
+        />
+        <button className="btn btn-primary" type="submit" disabled={busy}>
+          {busy ? "Sending..." : "Send request"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function Tabs({
+  active,
+  pendingCount,
+  friendCount,
+  onChange,
+}: {
+  active: TabKey;
+  pendingCount: number;
+  friendCount: number;
+  onChange: (tab: TabKey) => void;
+}) {
+  return (
+    <div className="friends-tabs">
+      <button
+        type="button"
+        className={`friends-tab ${active === "requests" ? "active" : ""}`}
+        onClick={() => onChange("requests")}
+      >
+        Requests
+        {pendingCount > 0 && <span className="friends-badge">{pendingCount}</span>}
+      </button>
+      <button
+        type="button"
+        className={`friends-tab ${active === "friends" ? "active" : ""}`}
+        onClick={() => onChange("friends")}
+      >
+        Friends
+        <span className="friends-badge muted">{friendCount}</span>
+      </button>
+      <span className={`friends-tab-indicator ${active}`} />
     </div>
   );
 }
@@ -304,6 +383,7 @@ function RequestCard({
   onSecondary,
   onViewProfile,
   disablePrimary = false,
+  removing = false,
 }: {
   request: FriendRequestResponse;
   actionLabel: string;
@@ -312,9 +392,10 @@ function RequestCard({
   onSecondary: () => void;
   onViewProfile: () => void;
   disablePrimary?: boolean;
+  removing?: boolean;
 }) {
   return (
-    <div className="friend-request-card">
+    <div className={`friend-request-card ${removing ? "removing" : ""}`}>
       <button type="button" className="friend-request-main" onClick={onViewProfile}>
         <Avatar user={request.user} />
         <div className="friend-request-copy">
@@ -335,6 +416,32 @@ function RequestCard({
   );
 }
 
+function FriendCard({
+  friend,
+  onProfile,
+  onRemove,
+}: {
+  friend: FriendUser;
+  onProfile: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="friend-card">
+      <button type="button" className="friend-card-main" onClick={onProfile}>
+        <Avatar user={friend} />
+        <div className="friend-card-copy">
+          <strong>{friend.displayName}</strong>
+          <span>@{friend.username}</span>
+        </div>
+      </button>
+      <div className="friend-card-status">Friend</div>
+      <button className="btn btn-secondary btn-sm" type="button" onClick={onRemove}>
+        Remove
+      </button>
+    </div>
+  );
+}
+
 function Avatar({ user }: { user: FriendUser }) {
   return user.hasAvatar ? (
     <img
@@ -347,11 +454,28 @@ function Avatar({ user }: { user: FriendUser }) {
   );
 }
 
-function EmptyPanel({ title, body }: { title: string; body: string }) {
+function EmptyState({
+  title,
+  body,
+  onCta,
+}: {
+  title: string;
+  body: string;
+  onCta: () => void;
+}) {
   return (
     <div className="empty-state friends-empty-state">
+      <div className="friends-empty-illustration">
+        <div className="friends-empty-orbit" />
+        <div className="friends-empty-avatar">
+          <span>+</span>
+        </div>
+      </div>
       <h4>{title}</h4>
       <p>{body}</p>
+      <button className="btn btn-primary btn-sm" type="button" onClick={onCta}>
+        Add Friend
+      </button>
     </div>
   );
 }

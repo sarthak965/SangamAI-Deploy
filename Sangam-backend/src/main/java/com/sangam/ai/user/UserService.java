@@ -10,6 +10,7 @@ import com.sangam.ai.workspace.ProjectFileStorageService;
 import com.sangam.ai.workspace.ProjectRepository;
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -27,6 +28,7 @@ public class UserService {
     private final ProjectFileStorageService projectFileStorageService;
     private final UserAvatarStorageService userAvatarStorageService;
     private final JwtService jwtService;
+    private final PasswordEncoder passwordEncoder;
 
     public CurrentUserResponse getCurrentUser(User currentUser) {
         return CurrentUserResponse.from(currentUser);
@@ -57,6 +59,22 @@ public class UserService {
     ) {
         currentUser.setAppearancePreference(parseAppearancePreference(request.appearancePreference()));
         return CurrentUserResponse.from(userRepository.save(currentUser));
+    }
+
+    @Transactional
+    public void updatePassword(User currentUser, UpdatePasswordRequest request) {
+        String current = request.currentPassword();
+        String next = request.newPassword();
+
+        if (!passwordEncoder.matches(current, currentUser.getPassword())) {
+            throw new IllegalArgumentException("Current password is incorrect");
+        }
+        if (passwordEncoder.matches(next, currentUser.getPassword())) {
+            throw new IllegalArgumentException("New password must be different from the current password");
+        }
+
+        currentUser.setPasswordHash(passwordEncoder.encode(next));
+        userRepository.save(currentUser);
     }
 
     @Transactional

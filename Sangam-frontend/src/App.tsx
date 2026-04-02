@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api } from "./lib/api";
+import Starfield from "./components/Starfield";
 import { realtimeManager } from "./lib/realtime";
 import { applyThemePreference } from "./lib/theme";
 import type { AuthResponse, CurrentUser } from "./types";
@@ -98,6 +99,7 @@ function App() {
 
   return (
     <Suspense fallback={<RouteLoadingScreen />}>
+      <Starfield enableTrail />
       <Routes>
         <Route
           path="/"

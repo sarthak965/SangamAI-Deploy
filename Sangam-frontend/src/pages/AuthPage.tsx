@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useTheme } from "../lib/theme";
@@ -16,6 +16,7 @@ export default function AuthPage({
   onAuthenticated: (auth: AuthResponse) => void;
 }) {
   const navigate = useNavigate();
+  const googleButtonRef = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<"login" | "register">("login");
   const [form, setForm] = useState({
     username: "",
@@ -25,10 +26,35 @@ export default function AuthPage({
   });
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [googleConfig, setGoogleConfig] = useState<{ enabled: boolean; clientId: string }>({
+    enabled: false,
+    clientId: "",
+  });
 
   useEffect(() => {
     if (currentUser) navigate("/app", { replace: true });
   }, [currentUser, navigate]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    api
+      .getGoogleAuthConfig()
+      .then((config) => {
+        if (!cancelled) {
+          setGoogleConfig(config);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setGoogleConfig({ enabled: false, clientId: "" });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -58,8 +84,74 @@ export default function AuthPage({
   const updateField = (field: string, value: string) =>
     setForm((prev) => ({ ...prev, [field]: value }));
 
+  const googleEnabled = googleConfig.enabled && Boolean(googleConfig.clientId);
+
   const { theme, toggle: toggleTheme } = useTheme();
   const displayError = formError ?? authError;
+
+  useEffect(() => {
+    if (!googleEnabled || !googleButtonRef.current) {
+      return;
+    }
+
+    const scriptId = "google-identity-services";
+    const existingScript = document.getElementById(scriptId) as HTMLScriptElement | null;
+
+    const renderGoogleButton = () => {
+      if (!window.google || !googleButtonRef.current) {
+        return;
+      }
+
+      googleButtonRef.current.innerHTML = "";
+      window.google.accounts.id.initialize({
+        client_id: googleConfig.clientId,
+        callback: async ({ credential }) => {
+          if (!credential) {
+            setFormError("Google authentication failed");
+            return;
+          }
+
+          setSubmitting(true);
+          setFormError(null);
+          try {
+            const auth = await api.googleLogin({ credential });
+            onAuthenticated(auth);
+            navigate("/app");
+          } catch (err) {
+            setFormError(err instanceof Error ? err.message : "Google authentication failed");
+          } finally {
+            setSubmitting(false);
+          }
+        },
+        ux_mode: "popup",
+      });
+
+      window.google.accounts.id.renderButton(googleButtonRef.current, {
+        theme: "outline",
+        size: "large",
+        text: mode === "login" ? "signin_with" : "signup_with",
+        shape: "pill",
+        width: 360,
+        logo_alignment: "left",
+      });
+    };
+
+    if (window.google) {
+      renderGoogleButton();
+      return;
+    }
+
+    const script = existingScript ?? document.createElement("script");
+    script.id = scriptId;
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = renderGoogleButton;
+
+    if (!existingScript) {
+      document.head.appendChild(script);
+    }
+  }, [googleConfig.clientId, googleEnabled, mode, navigate, onAuthenticated]);
 
   return (
     <div className="auth-page">
@@ -160,9 +252,35 @@ export default function AuthPage({
                 ? "Connecting..."
                 : mode === "login"
                   ? "Sign In"
-                  : "Create Account"}
+                : "Create Account"}
             </button>
           </form>
+
+          <>
+            <div className="auth-divider">
+              <span>or continue with</span>
+            </div>
+            <div className="auth-google-wrap">
+              {googleEnabled ? (
+                <div ref={googleButtonRef} className="auth-google-button" />
+              ) : (
+                <button
+                  className="auth-google-fallback"
+                  type="button"
+                  onClick={() =>
+                    setFormError(
+                      "Google sign-in is not configured yet. Set GOOGLE_CLIENT_ID in the backend and restart the server.",
+                    )
+                  }
+                >
+                  <span className="auth-google-fallback-icon">G</span>
+                  <span>
+                    {mode === "login" ? "Continue with Google" : "Sign up with Google"}
+                  </span>
+                </button>
+              )}
+            </div>
+          </>
         </div>
 
         <div className="auth-footer">

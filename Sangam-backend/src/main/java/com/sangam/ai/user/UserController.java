@@ -70,6 +70,15 @@ public class UserController {
         ));
     }
 
+    @PatchMapping("/me/password")
+    public ResponseEntity<ApiResponse<Void>> updatePassword(
+            @AuthenticationPrincipal User currentUser,
+            @Valid @RequestBody UpdatePasswordRequest request
+    ) {
+        userService.updatePassword(currentUser, request);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
     @PostMapping(value = "/me/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<CurrentUserResponse>> updateAvatar(
             @AuthenticationPrincipal User currentUser,

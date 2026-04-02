@@ -82,6 +82,17 @@ export const api = {
     });
   },
 
+  googleLogin(body: { credential: string }) {
+    return request<AuthResponse>("/api/auth/google", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  getGoogleAuthConfig() {
+    return request<{ enabled: boolean; clientId: string }>("/api/auth/google/config");
+  },
+
   getMe(token: string) {
     return request<CurrentUser>("/api/users/me", {}, token);
   },
@@ -117,6 +128,20 @@ export const api = {
       {
         method: "PATCH",
         body: JSON.stringify({ appearancePreference }),
+      },
+      token,
+    );
+  },
+
+  updatePassword(
+    token: string,
+    body: { currentPassword: string; newPassword: string },
+  ) {
+    return request<null>(
+      "/api/users/me/password",
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
       },
       token,
     );

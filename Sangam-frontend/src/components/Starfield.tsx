@@ -4,6 +4,9 @@ import { useEffect, useRef } from "react";
 const STAR_COUNT = 180;
 const STAR_MAX_RADIUS = 2;
 const PARALLAX_FACTOR = 0.03;
+const TRAIL_SPAWN_RATE = 1;
+const TRAIL_MAX = 300;
+const TRAIL_STREAM_COUNT = 20;
 
 /* ── star type ─────────────────────────────────────────────── */
 interface Star {
@@ -15,6 +18,15 @@ interface Star {
   depth: number;
   twinkleSpeed: number;
   twinkleOffset: number;
+}
+
+interface TrailParticle {
+  x: number;
+  y: number;
+  life: number;
+  maxLife: number;
+  size: number;
+  hue: number;
 }
 
 function createStars(count: number): Star[] {
@@ -35,10 +47,22 @@ function createStars(count: number): Star[] {
  * Stars drift upward, parallax-shift with cursor, and twinkle.
  * Adapts to light/dark theme automatically.
  */
-export default function Starfield() {
+export default function Starfield({ enableTrail = false }: { enableTrail?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const mouse = useRef({ x: 0.5, y: 0.5 });
+  const lastMouse = useRef({ x: 0.5, y: 0.5 });
   const stars = useRef<Star[]>(createStars(STAR_COUNT));
+  const trail = useRef<TrailParticle[]>([]);
+  const trailStream = useRef<TrailParticle[]>(
+    Array.from({ length: TRAIL_STREAM_COUNT }, (_, i) => ({
+      x: 0,
+      y: 0,
+      life: i / TRAIL_STREAM_COUNT,
+      maxLife: 1,
+      size: 3.6 - i * 0.08,
+      hue: 26 + i * 1.2,
+    })),
+  );
   const t0 = useRef(Date.now());
 
   useEffect(() => {
@@ -59,6 +83,30 @@ export default function Starfield() {
         x: e.clientX / window.innerWidth,
         y: e.clientY / window.innerHeight,
       };
+
+      if (!enableTrail) return;
+
+      const dx = mouse.current.x - lastMouse.current.x;
+      const dy = mouse.current.y - lastMouse.current.y;
+      lastMouse.current = { ...mouse.current };
+
+      const speed = Math.sqrt(dx * dx + dy * dy);
+      const baseSize = 3.2 + Math.min(5.4, speed * 36);
+
+      if (Math.random() <= TRAIL_SPAWN_RATE) {
+        const particle: TrailParticle = {
+          x: e.clientX,
+          y: e.clientY,
+          life: 0,
+          maxLife: 0.9 + Math.random() * 0.8,
+          size: baseSize,
+          hue: 24 + Math.random() * 12,
+        };
+        trail.current.push(particle);
+        if (trail.current.length > TRAIL_MAX) {
+          trail.current.splice(0, trail.current.length - TRAIL_MAX);
+        }
+      }
     };
     window.addEventListener("mousemove", onMove);
 
@@ -106,6 +154,37 @@ export default function Starfield() {
           ctx.fillStyle = `rgba(255, 200, 150, ${alpha * 0.08})`;
           ctx.fill();
         }
+      }
+
+      if (enableTrail && isDark) {
+        const dt = 1 / 60;
+        trail.current = trail.current.filter((p) => {
+          p.life += dt;
+          return p.life < p.maxLife;
+        });
+
+        for (const p of trail.current) {
+          const t = 1 - p.life / p.maxLife;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size * t, 0, Math.PI * 2);
+          ctx.fillStyle = `hsla(${p.hue}, 92%, 70%, ${0.55 * t})`;
+          ctx.fill();
+        }
+
+        const px = mouse.current.x * w;
+        const py = mouse.current.y * h;
+        trailStream.current.forEach((p, index) => {
+          const lag = (index + 1) * 0.11;
+          const targetX = px - (lastMouse.current.x - mouse.current.x) * w * 60 * lag;
+          const targetY = py - (lastMouse.current.y - mouse.current.y) * h * 60 * lag;
+          p.x += (targetX - p.x) * 0.14;
+          p.y += (targetY - p.y) * 0.14;
+
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, Math.max(1.2, p.size), 0, Math.PI * 2);
+          ctx.fillStyle = `hsla(${p.hue}, 96%, 72%, ${0.9 - index * 0.02})`;
+          ctx.fill();
+        });
       }
 
       /* subtle nebula glow near cursor (dark mode only) */

@@ -110,7 +110,7 @@ export default function ProfilePage({
     try {
       setBusyKey(`appearance-${preference}`);
       setError(null);
-      setNotice(null);
+      setToast(null);
       const updated = await api.updateAppearancePreference(
         token,
         preference.toUpperCase() as "LIGHT" | "DARK" | "SYSTEM",
@@ -283,13 +283,19 @@ export default function ProfilePage({
       {dialog === "password" && (
         <ProfileDialog
           title="Change password"
-          subtitle="Password changes will be available soon."
+          subtitle="Update your password to keep your account secure."
           onClose={() => setDialog(null)}
           onSubmit={() => {
-            setDialog(null);
-            setToast("Coming soon");
+            void withBusy("password", async () => {
+              await api.updatePassword(token, {
+                currentPassword: passwordDraft.current,
+                newPassword: passwordDraft.next,
+              });
+              setDialog(null);
+              setToast("Password updated.");
+            });
           }}
-          submitLabel="Save password"
+          submitLabel={busyKey === "password" ? "Saving..." : "Save password"}
           submitDisabled={
             !passwordDraft.current.trim() ||
             !passwordDraft.next.trim() ||
