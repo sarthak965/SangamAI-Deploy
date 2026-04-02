@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
-import { useTheme } from "../lib/theme";
+import { useForcedTheme } from "../lib/theme";
 import type { AuthResponse, CurrentUser } from "../types";
 
 export default function AuthPage({
@@ -30,6 +30,8 @@ export default function AuthPage({
     enabled: false,
     clientId: "",
   });
+
+  useForcedTheme("dark");
 
   useEffect(() => {
     if (currentUser) navigate("/app", { replace: true });
@@ -86,7 +88,6 @@ export default function AuthPage({
 
   const googleEnabled = googleConfig.enabled && Boolean(googleConfig.clientId);
 
-  const { theme, toggle: toggleTheme } = useTheme();
   const displayError = formError ?? authError;
 
   useEffect(() => {
@@ -155,17 +156,6 @@ export default function AuthPage({
 
   return (
     <div className="auth-page">
-      {/* Theme toggle in top-right corner */}
-      <button
-        className="btn btn-ghost"
-        onClick={toggleTheme}
-        type="button"
-        style={{ position: "fixed", top: "1rem", right: "1rem", zIndex: 10 }}
-        aria-label="Toggle theme"
-      >
-        {theme === "dark" ? "🌙" : "☀️"}
-      </button>
-
       <div className="auth-container">
         <div className="auth-header">
           <div className="logo-icon">S</div>
@@ -300,3 +290,5 @@ export default function AuthPage({
     </div>
   );
 }
+
+

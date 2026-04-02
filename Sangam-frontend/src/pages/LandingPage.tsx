@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, useScroll, useTransform } from "framer-motion";
+import { useForcedTheme } from "../lib/theme";
 import type { CurrentUser } from "../types";
 
 const ICON_FLOW = ["<>", "+", "@", "[]", "{ }", "AI", "//", "#", "*", "->"];
@@ -78,6 +79,8 @@ export default function LandingPage({
 }) {
   const navigate = useNavigate();
   const [navScrolled, setNavScrolled] = useState(false);
+
+  useForcedTheme("dark");
 
   const scrollToSection = (id: string) => {
     const element = document.getElementById(id);

@@ -3317,6 +3317,7 @@ input::placeholder, textarea::placeholder {
    NEW WORKSPACE SHELL
    ================================================================ */
 .workspace-layout {
+  --workspace-sidebar-width: 272px;
   min-height: 100vh;
   display: flex;
   background:
@@ -3338,7 +3339,7 @@ input::placeholder, textarea::placeholder {
 }
 
 .workspace-sidebar {
-  width: 272px;
+  width: var(--workspace-sidebar-width);
   position: fixed;
   inset: 0 auto 0 0;
   z-index: 80;
@@ -3392,6 +3393,43 @@ input::placeholder, textarea::placeholder {
 
 .workspace-sidebar-floating-toggle.visible {
   display: inline-flex;
+}
+
+.workspace-sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -8px;
+  width: 16px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.workspace-sidebar-resizer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 7px;
+  width: 2px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(255, 155, 104, 0.18) 12%,
+    rgba(255, 155, 104, 0.38) 50%,
+    rgba(255, 155, 104, 0.18) 88%,
+    transparent
+  );
+  border-radius: 999px;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.workspace-sidebar:hover .workspace-sidebar-resizer::before,
+.workspace-layout.resizing .workspace-sidebar-resizer::before {
+  opacity: 1;
 }
 
 .workspace-brand {
@@ -3654,7 +3692,7 @@ input::placeholder, textarea::placeholder {
 
 .workspace-main {
   flex: 1;
-  margin-left: 272px;
+  margin-left: var(--workspace-sidebar-width);
   min-height: 100vh;
   transition: margin-left 0.3s ease;
 }
@@ -5335,6 +5373,7 @@ input::placeholder, textarea::placeholder {
 
 @media (max-width: 1024px) {
   .workspace-sidebar {
+    width: 272px;
     transform: translateX(-100%);
     box-shadow: var(--shadow-lg);
   }
@@ -5349,6 +5388,10 @@ input::placeholder, textarea::placeholder {
 
   .workspace-main {
     margin-left: 0;
+  }
+
+  .workspace-sidebar-resizer {
+    display: none;
   }
 
   .solo-recent-grid {

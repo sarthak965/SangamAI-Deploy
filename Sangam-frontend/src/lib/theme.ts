@@ -47,6 +47,21 @@ export function initializeTheme() {
   return applyThemePreference(getStoredThemePreference());
 }
 
+export function useForcedTheme(theme: Theme) {
+  useEffect(() => {
+    const root = document.documentElement;
+    const previousTheme = root.getAttribute("data-theme");
+
+    applyTheme(theme);
+
+    return () => {
+      if (previousTheme === "light" || previousTheme === "dark") {
+        applyTheme(previousTheme);
+      }
+    };
+  }, [theme]);
+}
+
 export function useTheme() {
   const [preference, setPreference] = useState<ThemePreference>(() => getStoredThemePreference());
   const [theme, setTheme] = useState<Theme>(() => resolveThemePreference(preference));

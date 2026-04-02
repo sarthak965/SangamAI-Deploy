@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import type { CurrentUser, ProjectResponse, SoloChatSummaryResponse } from "../types";
 import { api } from "../lib/api";
@@ -17,11 +17,20 @@ export default function AppShell({
   recentChats: SoloChatSummaryResponse[];
   children: ReactNode;
 }) {
+  const DESKTOP_COLLAPSED_WIDTH = 0;
+  const DEFAULT_SIDEBAR_WIDTH = 272;
+  const MIN_SIDEBAR_WIDTH = 248;
+  const MAX_SIDEBAR_WIDTH = 380;
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
+  const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
+  const dragStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const [isMobile, setIsMobile] = useState(
+    () => typeof window !== "undefined" && window.innerWidth <= 1024,
+  );
   const location = useLocation();
   const navigate = useNavigate();
-  const isMobile = typeof window !== "undefined" && window.innerWidth <= 1024;
   const showSidebar = mobileOpen || !collapsed;
   const [projects, setProjects] = useState<ProjectResponse[]>([]);
 
@@ -35,16 +44,74 @@ export default function AppShell({
 
   const closeMobile = () => setMobileOpen(false);
 
+  const handleSidebarResizeStart = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (isMobile || collapsed) return;
+    event.preventDefault();
+    dragStateRef.current = {
+      startX: event.clientX,
+      startWidth: sidebarWidth,
+    };
+    setIsDraggingSidebar(true);
+  };
+
   useEffect(() => {
     closeMobile();
   }, [location.pathname]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const syncViewportMode = () => {
+      const mobile = window.innerWidth <= 1024;
+      setIsMobile(mobile);
+      if (mobile) {
+        setMobileOpen(false);
+      }
+    };
+
+    syncViewportMode();
+    window.addEventListener("resize", syncViewportMode);
+    return () => window.removeEventListener("resize", syncViewportMode);
+  }, []);
+
+  useEffect(() => {
     api.listProjects(token).then(setProjects).catch(() => setProjects([]));
   }, [token, recentChats]);
 
+  useEffect(() => {
+    if (!isDraggingSidebar) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!dragStateRef.current) return;
+      const nextWidth = dragStateRef.current.startWidth + (event.clientX - dragStateRef.current.startX);
+      setSidebarWidth(Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, nextWidth)));
+    };
+
+    const stopDragging = () => {
+      dragStateRef.current = null;
+      setIsDraggingSidebar(false);
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopDragging);
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopDragging);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isDraggingSidebar]);
+
+  const layoutStyle = {
+    "--workspace-sidebar-width":
+      !isMobile && showSidebar ? `${sidebarWidth}px` : `${DESKTOP_COLLAPSED_WIDTH}px`,
+  } as CSSProperties;
+
   return (
-    <div className="workspace-layout">
+    <div className={`workspace-layout ${isDraggingSidebar ? "resizing" : ""}`} style={layoutStyle}>
       <div
         className={`workspace-overlay ${mobileOpen ? "visible" : ""}`}
         onClick={closeMobile}
@@ -179,6 +246,15 @@ export default function AppShell({
             </div>
           </NavLink>
         </div>
+
+        {!isMobile && showSidebar ? (
+          <button
+            className="workspace-sidebar-resizer"
+            type="button"
+            aria-label="Resize sidebar"
+            onPointerDown={handleSidebarResizeStart}
+          />
+        ) : null}
       </aside>
 
       <main className={`workspace-main ${showSidebar ? "" : "expanded"}`}>
