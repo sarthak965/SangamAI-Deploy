@@ -3,6 +3,7 @@ package com.sangam.ai.realtime;
 import com.sangam.ai.common.response.ApiResponse;
 import com.sangam.ai.user.User;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +17,9 @@ public class RealtimeController {
 
     private final CentrifugoTokenService centrifugoTokenService;
 
+    @Value("${app.realtime.ws-url:ws://localhost:8001/connection/websocket}")
+    private String realtimeWsUrl;
+
     /**
      * GET /api/centrifugo/token
      *
@@ -24,7 +28,7 @@ public class RealtimeController {
      *
      * The frontend code will look something like:
      *   const { token } = await fetch('/api/centrifugo/token')
-     *   const centrifuge = new Centrifuge('ws://localhost:8001/connection/websocket', { token })
+     *   const centrifuge = new Centrifuge(wsUrlFromBackend, { token })
      *   centrifuge.connect()
      */
     @GetMapping("/token")
@@ -36,7 +40,7 @@ public class RealtimeController {
 
         return ResponseEntity.ok(ApiResponse.ok(Map.of(
                 "token", token,
-                "wsUrl", "ws://localhost:8001/connection/websocket"
+                "wsUrl", realtimeWsUrl
         )));
     }
 
