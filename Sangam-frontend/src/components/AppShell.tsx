@@ -122,7 +122,8 @@ export default function AppShell({
   }, [isDraggingSidebar, sidebarWidth]);
 
   const layoutStyle = {
-    "--workspace-sidebar-width":
+    "--workspace-sidebar-width": !isMobile ? `${sidebarWidth}px` : `${DEFAULT_SIDEBAR_WIDTH}px`,
+    "--workspace-main-offset":
       !isMobile && showSidebar ? `${sidebarWidth}px` : `${DESKTOP_COLLAPSED_WIDTH}px`,
   } as CSSProperties;
 

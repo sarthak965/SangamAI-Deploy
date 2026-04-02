@@ -3318,6 +3318,7 @@ input::placeholder, textarea::placeholder {
    ================================================================ */
 .workspace-layout {
   --workspace-sidebar-width: 272px;
+  --workspace-main-offset: 272px;
   min-height: 100vh;
   display: flex;
   background:
@@ -3708,7 +3709,7 @@ input::placeholder, textarea::placeholder {
 
 .workspace-main {
   flex: 1;
-  margin-left: var(--workspace-sidebar-width);
+  margin-left: var(--workspace-main-offset);
   min-height: 100vh;
   transition: margin-left 0.3s ease;
 }
