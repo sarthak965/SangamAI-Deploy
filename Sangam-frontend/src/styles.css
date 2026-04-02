@@ -3363,8 +3363,7 @@ input::placeholder, textarea::placeholder {
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
-.workspace-sidebar-toggle,
-.workspace-sidebar-floating-toggle {
+.workspace-sidebar-edge-toggle {
   width: 34px;
   height: 34px;
   border-radius: 11px;
@@ -3375,24 +3374,41 @@ input::placeholder, textarea::placeholder {
   color: rgba(244, 238, 230, 0.86);
   background: rgba(255, 255, 255, 0.04);
   box-shadow: none;
+  transition:
+    left 0.3s ease,
+    transform 0.3s ease,
+    background var(--transition),
+    border-color var(--transition),
+    color var(--transition);
 }
 
-.workspace-sidebar-toggle svg,
-.workspace-sidebar-floating-toggle svg {
+.workspace-sidebar-edge-toggle svg {
   width: 17px;
   height: 17px;
 }
 
-.workspace-sidebar-floating-toggle {
+.workspace-sidebar-edge-toggle {
   position: fixed;
   top: 1rem;
-  left: 1rem;
+  left: calc(var(--workspace-sidebar-width) - 17px);
   z-index: 90;
-  display: none;
+  background: rgba(18, 18, 21, 0.94);
+  backdrop-filter: blur(18px);
 }
 
-.workspace-sidebar-floating-toggle.visible {
-  display: inline-flex;
+.workspace-sidebar-edge-toggle.collapsed {
+  left: 0.9rem;
+}
+
+.workspace-sidebar-edge-toggle.mobile {
+  left: 1rem;
+}
+
+.workspace-sidebar-edge-toggle:hover,
+.workspace-sidebar-edge-toggle:focus-visible {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 155, 104, 0.28);
+  color: #fff7ef;
 }
 
 .workspace-sidebar-resizer {
@@ -5380,10 +5396,6 @@ input::placeholder, textarea::placeholder {
 
   .workspace-sidebar.open {
     transform: translateX(0);
-  }
-
-  .workspace-sidebar-floating-toggle.visible {
-    display: inline-flex;
   }
 
   .workspace-main {

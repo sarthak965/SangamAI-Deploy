@@ -21,6 +21,7 @@ export default function AppShell({
   const DEFAULT_SIDEBAR_WIDTH = 272;
   const MIN_SIDEBAR_WIDTH = 248;
   const MAX_SIDEBAR_WIDTH = 380;
+  const COLLAPSE_DRAG_THRESHOLD = 140;
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
@@ -39,7 +40,13 @@ export default function AppShell({
       setMobileOpen((prev) => !prev);
       return;
     }
-    setCollapsed((prev) => !prev);
+    setCollapsed((prev) => {
+      const nextCollapsed = !prev;
+      if (!nextCollapsed && sidebarWidth < MIN_SIDEBAR_WIDTH) {
+        setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+      }
+      return nextCollapsed;
+    });
   };
 
   const closeMobile = () => setMobileOpen(false);
@@ -84,10 +91,19 @@ export default function AppShell({
     const handlePointerMove = (event: PointerEvent) => {
       if (!dragStateRef.current) return;
       const nextWidth = dragStateRef.current.startWidth + (event.clientX - dragStateRef.current.startX);
+      if (nextWidth <= COLLAPSE_DRAG_THRESHOLD) {
+        setSidebarWidth(0);
+        return;
+      }
+
       setSidebarWidth(Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, nextWidth)));
     };
 
     const stopDragging = () => {
+      if (sidebarWidth <= COLLAPSE_DRAG_THRESHOLD) {
+        setCollapsed(true);
+        setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+      }
       dragStateRef.current = null;
       setIsDraggingSidebar(false);
     };
@@ -103,7 +119,7 @@ export default function AppShell({
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
-  }, [isDraggingSidebar]);
+  }, [isDraggingSidebar, sidebarWidth]);
 
   const layoutStyle = {
     "--workspace-sidebar-width":
@@ -118,24 +134,16 @@ export default function AppShell({
       />
 
       <button
-        className={`workspace-sidebar-floating-toggle ${!showSidebar ? "visible" : ""}`}
+        className={`workspace-sidebar-edge-toggle ${showSidebar ? "open" : "collapsed"} ${isMobile ? "mobile" : ""}`}
         onClick={toggleSidebar}
-        aria-label="Open sidebar"
+        aria-label={showSidebar ? "Collapse sidebar" : "Expand sidebar"}
         type="button"
       >
-        <SparkIcon />
+        <SidebarToggleIcon collapsed={!showSidebar} />
       </button>
 
       <aside className={`workspace-sidebar ${showSidebar ? "open" : "collapsed"}`}>
         <div className="workspace-sidebar-head">
-          <button
-            className="workspace-sidebar-toggle"
-            onClick={toggleSidebar}
-            type="button"
-            aria-label={showSidebar ? "Collapse sidebar" : "Expand sidebar"}
-          >
-            <SparkIcon />
-          </button>
           <div className="workspace-brand">
             <div className="logo-icon">S</div>
             <div>
@@ -268,18 +276,17 @@ export default function AppShell({
   );
 }
 
-function SparkIcon() {
+function SidebarToggleIcon({ collapsed }: { collapsed: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="3.25" y="4" width="13.5" height="12" rx="2.4" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M8 4.65v10.7" stroke="currentColor" strokeWidth="1.3" />
       <path
-        d="M12 2.5 13.9 8l5.6 1.9-5.6 1.9L12 17.5l-1.9-5.7L4.5 9.9 10.1 8 12 2.5Z"
+        d={collapsed ? "M11 10h3M12.7 8.3 14.4 10l-1.7 1.7" : "M14 10h-3M12.3 8.3 10.6 10l1.7 1.7"}
         stroke="currentColor"
-        strokeWidth="1.4"
+        strokeWidth="1.3"
+        strokeLinecap="round"
         strokeLinejoin="round"
-      />
-      <path
-        d="M18.5 16.5 19.3 19l2.2.8-2.2.7-.8 2.5-.8-2.5-2.2-.7 2.2-.8.8-2.5Z"
-        fill="currentColor"
       />
     </svg>
   );
