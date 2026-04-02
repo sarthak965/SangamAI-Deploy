@@ -37,4 +37,4 @@ cat > /tmp/config.json <<EOF
 }
 EOF
 
-exec centrifugo -c /tmp/config.json --port "${PORT:-8000}"
+exec centrifugo serve -c /tmp/config.json --http_server.port "${PORT:-8000}"
