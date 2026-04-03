@@ -211,7 +211,7 @@ export default function LandingPage({
             </p>
             <div className="story-feature-media">
               <video
-                src="/video3.mp4"
+                src="https://res.cloudinary.com/daoepe39c/video/upload/v1775203595/video3_jntnwz.mp4"
                 aria-label="Collaborative AI conversations preview"
                 autoPlay
                 muted
