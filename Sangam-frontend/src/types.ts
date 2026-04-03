@@ -11,6 +11,10 @@ export interface AuthResponse {
   userId: string;
 }
 
+export interface PasswordResetResponse {
+  message: string;
+}
+
 export interface CurrentUser {
   id: string;
   username: string;

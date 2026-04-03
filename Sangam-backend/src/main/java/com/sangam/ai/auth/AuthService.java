@@ -36,12 +36,13 @@ public class AuthService {
     }
 
     public AuthResponse register(RegisterRequest request) {
+        String normalizedEmail = normalizeEmail(request.email());
 
         // Check for conflicts before doing any work
         if (userRepository.existsByUsername(request.username())) {
             throw new IllegalArgumentException("Username already taken");
         }
-        if (userRepository.existsByEmail(request.email())) {
+        if (userRepository.existsByEmail(normalizedEmail)) {
             throw new IllegalArgumentException("Email already registered");
         }
 
@@ -51,7 +52,7 @@ public class AuthService {
         // be reversed. We only ever compare, never decode.
         User user = User.builder()
                 .username(request.username())
-                .email(request.email())
+                .email(normalizedEmail)
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .displayName(request.displayName())
                 .build();
@@ -67,13 +68,14 @@ public class AuthService {
     }
 
     public AuthResponse login(LoginRequest request) {
+        String normalizedEmail = normalizeEmail(request.email());
 
         // Look up by email — throw a generic error if not found.
         // IMPORTANT: we use the same generic error message for both
         // "user not found" and "wrong password". This is intentional —
         // different error messages for each case would let an attacker
         // enumerate valid email addresses on your platform.
-        User user = userRepository.findByEmail(request.email())
+        User user = userRepository.findByEmail(normalizedEmail)
                 .orElseThrow(() -> new BadCredentialsException("Invalid credentials"));
 
         // BCrypt comparison: passwordEncoder.matches() takes the
@@ -183,5 +185,9 @@ public class AuthService {
 
     private String asString(Object value) {
         return value == null ? null : String.valueOf(value);
+    }
+
+    private String normalizeEmail(String email) {
+        return email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
     }
 }

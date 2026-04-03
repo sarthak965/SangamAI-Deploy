@@ -8,6 +8,7 @@ import type {
   FriendsOverviewResponse,
   FriendUser,
   MemberResponse,
+  PasswordResetResponse,
   ProjectFileResponse,
   ProjectMemoryEntryResponse,
   ProjectMemberResponse,
@@ -77,6 +78,20 @@ export const api = {
 
   login(body: { email: string; password: string }) {
     return request<AuthResponse>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  requestPasswordReset(body: { email: string }) {
+    return request<PasswordResetResponse>("/api/auth/password-reset/request", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  confirmPasswordReset(body: { email: string; otp: string; newPassword: string }) {
+    return request<PasswordResetResponse>("/api/auth/password-reset/confirm", {
       method: "POST",
       body: JSON.stringify(body),
     });

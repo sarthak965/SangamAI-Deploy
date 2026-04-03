@@ -32,7 +32,7 @@ export default function AppShell({
   );
   const location = useLocation();
   const navigate = useNavigate();
-  const showSidebar = mobileOpen || !collapsed;
+  const showSidebar = isMobile ? mobileOpen : !collapsed;
   const [projects, setProjects] = useState<ProjectResponse[]>([]);
 
   const toggleSidebar = () => {

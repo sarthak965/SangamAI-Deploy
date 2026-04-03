@@ -1,5 +1,6 @@
 package com.sangam.ai.common.exception;
 
+import com.sangam.ai.auth.PasswordResetUnavailableException;
 import com.sangam.ai.common.response.ApiResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -71,6 +72,14 @@ public class GlobalExceptionHandler {
             IllegalArgumentException ex) {
         return ResponseEntity
                 .status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(PasswordResetUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePasswordResetUnavailable(
+            PasswordResetUnavailableException ex) {
+        return ResponseEntity
+                .status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(ApiResponse.error(ex.getMessage()));
     }
 

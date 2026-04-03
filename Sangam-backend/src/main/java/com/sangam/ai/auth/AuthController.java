@@ -3,6 +3,9 @@ package com.sangam.ai.auth;
 import com.sangam.ai.auth.dto.AuthResponse;
 import com.sangam.ai.auth.dto.GoogleLoginRequest;
 import com.sangam.ai.auth.dto.LoginRequest;
+import com.sangam.ai.auth.dto.PasswordResetConfirmRequest;
+import com.sangam.ai.auth.dto.PasswordResetRequest;
+import com.sangam.ai.auth.dto.PasswordResetResponse;
 import com.sangam.ai.auth.dto.RegisterRequest;
 import com.sangam.ai.common.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -19,6 +22,7 @@ import java.util.Map;
 public class AuthController {
 
     private final AuthService authService;
+    private final PasswordResetService passwordResetService;
 
     /**
      * POST /api/auth/register
@@ -50,6 +54,18 @@ public class AuthController {
     public ResponseEntity<ApiResponse<AuthResponse>> googleLogin(
             @Valid @RequestBody GoogleLoginRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(authService.googleLogin(request)));
+    }
+
+    @PostMapping("/password-reset/request")
+    public ResponseEntity<ApiResponse<PasswordResetResponse>> requestPasswordReset(
+            @Valid @RequestBody PasswordResetRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(passwordResetService.requestReset(request)));
+    }
+
+    @PostMapping("/password-reset/confirm")
+    public ResponseEntity<ApiResponse<PasswordResetResponse>> confirmPasswordReset(
+            @Valid @RequestBody PasswordResetConfirmRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(passwordResetService.confirmReset(request)));
     }
 
     @GetMapping("/google/config")
